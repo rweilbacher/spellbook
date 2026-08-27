@@ -22,7 +22,7 @@ big enough to need thinking through).
 
 `spiralling` · `stuck` · `avoiding` · `defending` · `disconnected` · `overwhelmed` · `afraid` · `self-attacking` · `in-my-head` · `flat` · `rushing` · `wanting` · `with-her` · `among-people` · `arriving`
 
-**Form — secondary.** `practice` (a procedure, not a line) · `prompt` (wants twenty minutes) · `needs-review` (reconsider this — imported wrong, or tried and it didn't help)
+**Form — secondary.** `practice` (a procedure, not a line) · `prompt` (wants twenty minutes) · `flagged` (reconsider this — imported wrong, or tried and it didn't help; locked, can't be renamed or removed as a tag) · `inbox` (new, unproven — a `useful` mark strips it; burying just removes the spell from the draw, tag and all, until it's exhumed)
 
 **Computed, never stored.** `question` · `untagged` · `useful`
 
@@ -70,6 +70,8 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 - Fixed: a tag on a card only turns brass when it's part of your active filter selection, not just because it's a situation — drawing no longer paints every situation tag orange regardless of what you asked for
 - Removed A–Z from the library sort order, down to Recent / Most useful / Most drawn
 - **The desk** — a fifth quick-action (a pin) on every card, alongside useful/review/source/bury. Its own nav tab, most-recent-first. Falls off after three days into a fading **recently decayed** shelf, gone three days after that. Re-pinning — the same action, on either shelf — refreshes the clock and rescues a fading spell back to the top. Stored as a timestamp only, so decay needs no cleanup job. The pin lights brass, the decayed shelf desaturates and dims, and the desk's header carries a faint lamp glow.
+- **The inbox.** Shipped as an ordinary tag (`inbox`), not the third `state` this was first sketched as below — it gets the same tag management and Require/Never filtering as everything else, for free. Newly written or imported spells carry it; migrated once, retroactively, over everything already in the book that wasn't already marked useful. Over-represented in the draw by a weight set in Vault → The draw (`inboxWeight`, default 3×). Shows an *untested* badge when drawn, so a miss reads as *this one didn't work* rather than *the book is noisy*. A `useful` mark strips it automatically; it can also be removed by hand, same as any authored tag.
+- **`needs-review` renamed to `flagged`**, and locked in the tag manager — can't be renamed or removed as a tag there (per-spell it still toggles freely from the card's flag action or the editor). The old `review` bookmark and `needs-review` both migrate to it on load. Gets its own draw-weight setting alongside inbox's (`flaggedWeight`, default 1 — no effect; try 0.8 to quietly draw flagged spells less often). The two weights multiply when a spell carries both tags.
 
 ## Bugs
 
@@ -85,7 +87,6 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 - **Weighted draw**, defaulting to favouring the never-drawn. One switch, reversible.
 - **Text notes on a spell.** Any spell can accumulate what happened when you used it. Over a year this is the most interesting data in the book.
 - **Exhume.** Occasionally the draw offers something buried, marked as such. Keeps burial from feeling final.
-- **The inbox.** Spec below.
 
 ## Later
 
@@ -121,17 +122,23 @@ One menu item doing two incompatible jobs is what caused the lost counts. Split 
 
 The distinction to keep straight: restore trusts the file completely, merge trusts the phone.
 
-## The inbox
+## The inbox — shipped
 
 The threshold for adding a spell should be near zero, but a spell that just arrived hasn't earned anything. The inbox reconciles those.
 
-- A third state alongside `active` and `graveyard`. New spells — written by hand, imported, captured in a hurry — land here.
-- **Preferential treatment means more exposure, not more trust.** Inbox spells are over-represented in the draw precisely because they're unproven, so they get tested while you still remember why you wrote them.
+- Shipped as a tag (`inbox`), not the third `state` this section originally sketched — simpler, and it comes with tag management (rename, remove) and Require/Never filtering for free, the same as `practice`/`prompt`/`flagged`. New spells — written by hand, imported — land here; migrated once, retroactively, over everything already in the book that wasn't already marked useful.
+- **Preferential treatment means more exposure, not more trust.** Over-represented in the draw by a weight set directly in Vault → The draw (`inboxWeight`, default 3×), rather than a fixed multiplier — see Draw weighting, below.
 - Visibly marked as untested when drawn, so a miss reads as *this one didn't work* rather than *the book is noisy*.
-- Promotion by use: one `useful` mark moves it to `active`. Demotion is the ordinary bury.
-- Capture should be one tap from anywhere, which eventually means the Android share target.
+- Promotion by use: one `useful` mark strips the tag. Demotion is the ordinary bury — a buried spell keeps `inbox` (and its weight, if it's ever exhumed) rather than losing it on the way to the graveyard. Can also be removed by hand, same as any authored tag.
+- Capture is still the write-a-spell sheet and import; one tap from anywhere still means the Android share target, below.
 
-**Open:** does an inbox spell need tagging before it can be drawn, or is it drawn untagged and tagged only if it survives? Leaning towards the latter — tagging something you're about to bury is wasted effort.
+**Open:** does an inbox spell need tagging before it can be drawn, or is it drawn untagged and tagged only if it survives? Unaffected by the tag-vs-state choice above — still open. Leaning towards the latter — tagging something you're about to bury is wasted effort.
+
+## Draw weighting — shipped
+
+`inbox` and `flagged` (see vocabulary, above) each carry their own multiplier into the draw, set in Vault → The draw: `inboxWeight` (default 3) and `flaggedWeight` (default 1 — no effect; try 0.8 to quietly draw flagged spells less often without hiding them). A spell carrying both multiplies them together. Weight-zero doesn't crash the draw, it just falls back to a plain random pick among whatever's left.
+
+This is separate from the **Weighted draw** queued above, which is about favouring the never-drawn generally, independent of any tag.
 
 ## Dark spells
 
