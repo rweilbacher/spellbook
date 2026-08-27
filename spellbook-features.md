@@ -30,6 +30,8 @@ big enough to need thinking through).
 
 A spell matching no situation keeps no tags and shows as `untagged`. That pile is a finding, not a gap.
 
+**Two kinds of filter, matched to two kinds of tag.** Situations (plus `untagged`, the unsituated state) describe where you are — tap any that apply in the filter sheet and they OR together: a spell needs to match at least one. Everything else — form and computed tags alike — describes what the spell *is*, and gets its own **Only** / **Never** per tag: Only tags AND together (a spell must have all of them), Never tags rule a spell out if it has any of them. The two groups always combine with AND.
+
 ---
 
 # State
@@ -38,7 +40,7 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 
 - Draw ritual — sigil, cast animation, reveal, six-second re-inscription cooldown
 - 1–3 spells per cast, staggered reveal
-- Sticky tag filters — require a tag, banish a tag
+- Sticky tag filters, persisted between sessions
 - No-repeat window of 12
 - Library with search and four sort orders
 - Tag index with counts
@@ -60,11 +62,11 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 - Fixed: `useful` is its own computed, filterable tag, same mechanism as `question`/`untagged` — no proven/unproven axis needed, it just shows up in the tag list
 - Fixed: the review quick action now sets `needs-review` rather than `review` — one tag standing for both "imported wrong" and "didn't help, reconsider." Icon changed from a bookmark to a flag; legacy `review` tags migrate on load
 - Automatic weekly export to Downloads via MediaStore, riding along on every save
+- Fixed: the filter sheet splits into **Situations** (tap any that apply, OR'd) and **Type & marks** (per-tag Only/Never, AND'd) — replacing the three-state cycle. Old sticky filters migrate into the new shape on load
 
 ## Bugs
 
 - **Restoring a backup silently drops your counts.** Import never overwrites `useful`, `drawn` or `state` — right when merging, wrong when restoring. After an uninstall the app seeds from the APK with everything at zero; importing your export leaves it at zero, because the ids already exist. Fixed properly by splitting import in two (spec below); the merge path should also take the maximum of stored and incoming counts.
-- **Filter UX is clumsy.** Cycling a tag through three states to reach the one you want, and once *only these* is set, *never* mostly stops mattering. Wants a mode toggle — **Only** / **Never** — so one tap means one thing.
 
 ---
 
