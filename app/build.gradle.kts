@@ -23,10 +23,14 @@ android {
 
     defaultConfig {
         applicationId = "com.spellbook"
-        minSdk = 29
+        // 31 (Android 12) is the floor because voice notes route microphone
+        // input with AudioManager.setCommunicationDevice, which arrived there.
+        // The startBluetoothSco path it replaced is deprecated and was never
+        // worth carrying for a personal app on a phone running 16.
+        minSdk = 31
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
     }
 
     buildTypes {
@@ -53,4 +57,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-ktx:1.9.3")
     implementation("androidx.webkit:webkit:1.12.1")
+    // Writing into whichever folder you pick for backups, through the grant
+    // the system persists for us.
+    implementation("androidx.documentfile:documentfile:1.0.1")
 }

@@ -86,6 +86,8 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 
 ## Next
 
+- **Voice notes on a spell.** Spec below. In progress.
+- **A backup folder you choose.** Spec below. Ships with voice notes, since it's what carries the audio.
 - **Two kinds of import.** Spec below.
 - **Weighted draw**, defaulting to favouring the never-drawn. One switch, reversible.
 - **Exhume.** Occasionally the draw offers something buried, marked as such. Keeps burial from feeling final.
@@ -97,9 +99,8 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 - **Dark spells.** Spec below.
 - **Android share target** — highlight text anywhere, share into the inbox.
 - **The djinn.** Spec below.
-- **Voice notes on a spell.** Microphone permission and a second bridge method; audio goes to its own files with only filenames in the JSON. Base64 in the book would take it from 100KB to megabytes, rewritten on every edit. The notes array shipped with this in mind — a voice note is just another entry, `{type:'voice', file}`, in the same thread as the text ones.
 - **Swipeable stack** for multi-spell draws, if scrolling three keeps feeling wrong.
-- **Add an image to a spell.** Same shape problem as voice notes: keep it out of the JSON. Store the picture in its own file (bridge method to write bytes from a data URL or picked file, mirroring how `save`/`export` already work) and keep only a filename on the spell. Needs a picker path in the editor — either the existing file-chooser plumbing in `MainActivity`, or a small camera/gallery intent — and a place to show it on the card and detail sheet.
+- **Add an image to a spell.** Same shape problem as voice notes, and it should follow the same answer — its own file in `files/media/`, a filename on the note, carried by the backup folder and not by the export. Store the picture in its own file (bridge method to write bytes from a data URL or picked file, mirroring how `save`/`export` already work) and keep only a filename on the spell. Needs a picker path in the editor — either the existing file-chooser plumbing in `MainActivity`, or a small camera/gallery intent — and a place to show it on the card and detail sheet.
 
 ## Someday — spellbooks in a room together
 
@@ -142,6 +143,109 @@ The threshold for adding a spell should be near zero, but a spell that just arri
 `inbox` and `flagged` (see vocabulary, above) each carry their own multiplier into the draw, set in Vault → The draw: `inboxWeight` (default 3) and `flaggedWeight` (default 1 — no effect; try 0.8 to quietly draw flagged spells less often without hiding them). A spell carrying both multiplies them together. Weight-zero doesn't crash the draw, it just falls back to a plain random pick among whatever's left.
 
 This is separate from the **Weighted draw** queued above, which is about favouring the never-drawn generally, independent of any tag.
+
+## Voice notes
+
+A note you speak instead of type. It lands in the same thread as the text ones,
+carries the same timestamp, deletes the same way. A text note is
+`{type:'text', text}`; a voice note is `{type:'voice', file, duration}`. The
+notes array shipped in this shape on purpose — nothing about the thread had to
+change to admit it.
+
+**Not dictation.** Speech-to-text was the cheaper feature by a wide margin — no
+new storage shape, no backup problem, notes stay searchable — and it was
+rejected because on-device recognition fails exactly where this feature is
+used: half-formed thoughts, feeling rather than information, words invented on
+the spot. A bad transcript of something you said while shaken is worse than no
+note at all. Recording also doesn't foreclose transcription — if the djinn
+arrives, a recording can be transcribed later, per note, opt-in, by a model
+that's actually good at it.
+
+**Recording is native Kotlin, not the web layer.** The page could have asked
+the browser engine for the microphone and shipped the audio back across the
+bridge, which would have kept everything in `index.html` and kept working in
+desktop preview. It was rejected for one reason: the web API gives you whatever
+input device the system considers default, with no say in the matter, and the
+headset requirement below makes that disqualifying. Handing off to the system
+recorder app was rejected too — it throws you out of the app mid-thought, and
+it's the app whose Bluetooth behaviour prompted this in the first place.
+
+So: `startVoiceNote()` / `stopVoiceNote()` / `cancelVoiceNote()` on the bridge,
+Kotlin owns the recorder and writes the file, and the page is told only
+`{file, duration}` when it's done. Progress — elapsed time and input level —
+is pushed back into the page a few times a second so the UI has something
+alive to show. The consequence to accept: **no voice notes in desktop preview.**
+The mic button simply isn't rendered when there's no bridge, the same way the
+storage banner already admits what preview can't do.
+
+**Bluetooth first, knowingly.** When a headset is connected, record through it.
+Google Recorder ignoring the headset isn't a bug on their part — a classic
+Bluetooth headset mic is a telephone-grade link, 8–16kHz, plainly worse than
+the phone's own microphone, and a recorder app is right to prefer fidelity. But
+this isn't a recorder app. A voice note gets spoken quietly, hands busy, earbuds
+already in, and convenience beats fidelity every time at that moment. Phones and
+headsets that both speak LE Audio get proper quality anyway, for free, with
+nothing to build.
+
+Practically: bring the link up, wait for it, *then* start capturing, or the
+first second or two is lost. If it hasn't connected within about two seconds,
+fall back to the built-in mic and say so rather than failing. A toggle in the
+Vault turns the preference off for the one time you care how it sounds.
+
+**Where the audio lives.** `files/media/`, one AAC file per note, filename on
+the note. Never base64 in the book: at ~100KB the JSON is rewritten on every
+single edit, and a megabyte of audio in there would make every keystroke
+expensive. The media directory is served over the same internal `https://`
+origin the app already uses for its assets, so playback is an ordinary
+`<audio>` tag and nothing has to loosen file access. Seeking within a note may
+not work — the asset loader doesn't answer range requests — which is fine at
+this length and would be the reason to change approach if notes ever got long.
+
+**The export stays JSON, and stays honest about it.** `Export the book`
+continues to write one JSON file with no audio in it. A restored book therefore
+has voice notes whose recordings are gone, and those render as
+*recording lost* rather than a broken player. The offsite copy of the audio is
+the backup folder's job, below — that's the split: the export is the portable
+book, the backup folder is the complete one.
+
+**Housekeeping is real work and easy to forget.** Deleting a note deletes its
+file. A book loaded on a phone that has files nothing refers to sweeps them on
+boot. Both go through the bridge with the filename validated against a strict
+pattern first — the web layer must never be able to name a path.
+
+**Open:** whether a voice note should ever be transcribed into a text note it
+sits beside, or whether the recording alone is the artefact. Deferred until the
+djinn exists and there's something to try it with.
+
+## Backups — a folder you choose
+
+The automatic weekly JSON copy to Downloads was insurance built when the book
+was the only thing worth insuring. Audio changes that, and Downloads is the
+wrong place to accumulate a media folder.
+
+**Pick a folder once, in the Vault.** Android's folder picker, with the grant
+persisted, so the app can keep writing there indefinitely. Into it, at most
+once a day and riding along on an ordinary save exactly as the weekly export
+does now: the book as `spellbook-YYYY-MM-DD.json`, and every audio file not
+already there, under `media/`. Fourteen dated snapshots kept.
+
+**Offsite is somebody else's problem, deliberately.** Point the folder at
+something a sync app already mirrors — Autosync, FolderSync, Syncthing — and
+the Drive copy happens with no code here at all. Talking to the Drive API
+directly was considered and rejected: a Cloud project, a consent screen, and
+for an app that never gets published, tokens that expire weekly. Days of work
+and permanent friction to replace a folder path.
+
+**Android's own app backup is not the answer either**, though `allowBackup` has
+been on this whole time and it's plausibly been copying `spellbook.json` to
+Google's servers all along. It restores only when an app is installed as part
+of setting up a phone — never when you sideload an APK onto a phone already
+running, which is the entire install story here. Real insurance against losing
+the phone, no help at all in the situation the README is actually about. It
+also caps at 25MB, which audio would eat.
+
+**Nothing changes if you don't set a folder.** The weekly Downloads export
+stays exactly as it is, so the app is never less safe than it was.
 
 ## Dark spells
 

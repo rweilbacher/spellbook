@@ -53,6 +53,29 @@ A dated copy goes to `files/backups/` the first time you change something each
 day, seven kept. **Export** in the Vault writes a copy to your Downloads folder;
 that's the one you'd carry to a new phone.
 
+Voice notes are not in that file. Each one is an `.m4a` in
+`files/media/`, and the note carries only its filename — audio in the JSON would
+take it from 100KB to megabytes, rewritten on every keystroke. **The export
+therefore does not carry your recordings**, and a book restored from one shows
+those notes as *recording lost*. That is the deliberate split: the export is the
+portable book, the backup folder below is the complete one.
+
+## The backup folder
+
+Pick one in Vault → **Backup folder** and the book plus every recording is
+copied there once a day, riding along on an ordinary save. Fourteen dated
+snapshots are kept; audio is never pruned. Point it at a folder some sync app
+already mirrors — Autosync, FolderSync, Syncthing — and the offsite copy needs
+no code here at all.
+
+Pick nothing and the old weekly JSON drop into Downloads carries on exactly as
+before, so the app is never less safe than it was.
+
+Android's own app backup is not a substitute, though `allowBackup` is on: it
+restores only when an app is installed as part of setting up a phone, never when
+you sideload an APK onto a phone already running — which is the whole install
+story here.
+
 ## A note on the repo contents
 
 `index.html` has the spells baked in, so the repository holds your notes. Keep
