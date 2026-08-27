@@ -596,7 +596,7 @@ function matchesFilters(s, extraRequire){
   return true;
 }
 function pool(){
-  return active().filter(matchesFilters);
+  return active().filter(s => matchesFilters(s));
 }
 
 /* How many active spells would be left if `t` were added to Require,
@@ -1044,7 +1044,7 @@ function renderLibrary(){
   const q = ($('#search').value || '').trim().toLowerCase();
   let list = libGrave ? buried() : active();
   if(libTag) list = list.filter(s => tagsOf(s).includes(libTag));
-  list = list.filter(matchesFilters);
+  list = list.filter(s => matchesFilters(s));
   if(q) list = list.filter(s => s.text.toLowerCase().includes(q) || tagsOf(s).some(t=>t.includes(q)));
 
   list = list.slice().sort((a,b)=>{
