@@ -30,7 +30,9 @@ big enough to need thinking through).
 
 A spell matching no situation keeps no tags and shows as `untagged`. That pile is a finding, not a gap.
 
-**Two kinds of filter, matched to two kinds of tag.** Situations (plus `untagged`, the unsituated state) describe where you are — tap any that apply in the filter sheet and they OR together: a spell needs to match at least one. Everything else — form and computed tags alike — describes what the spell *is*, and gets its own **Only** / **Never** per tag: Only tags AND together (a spell must have all of them), Never tags rule a spell out if it has any of them. The two groups always combine with AND.
+**Two kinds of filter, matched to two kinds of tag.** Situations (plus `untagged`, the unsituated state) describe where you are — tap any that apply in the filter sheet and they OR together: a spell needs to match at least one. Everything else — form and computed tags alike — describes what the spell *is*, and gets its own **Require** / **Never** per tag: Require tags AND together (a spell must have all of them), Never tags rule a spell out if it has any of them. The two groups always combine with AND. ("Only" was the first name for Require — dropped because it reads as exclusive when several are on at once, and it's really "all of these," not "just this one.") The same filters narrow both the draw and the library.
+
+**Orange marks what you asked for, not what a spell is.** A tag lights up on a card only when it's part of your current filter selection — the situations you picked, the tags you set to Require. A situation or type tag just sitting on the spell, unselected, stays plain. This keeps the color meaning one thing: this is why you're looking at this spell right now.
 
 ---
 
@@ -42,7 +44,7 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 - 1–3 spells per cast, staggered reveal
 - Sticky tag filters, persisted between sessions
 - No-repeat window of 12
-- Library with search and four sort orders
+- Library with search, the sticky filters, and three sort orders
 - Tag index with counts
 - Spell detail with source behind a tap
 - Mark useful, with count
@@ -62,7 +64,11 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 - Fixed: `useful` is its own computed, filterable tag, same mechanism as `question`/`untagged` — no proven/unproven axis needed, it just shows up in the tag list
 - Fixed: the review quick action now sets `needs-review` rather than `review` — one tag standing for both "imported wrong" and "didn't help, reconsider." Icon changed from a bookmark to a flag; legacy `review` tags migrate on load
 - Automatic weekly export to Downloads via MediaStore, riding along on every save
-- Fixed: the filter sheet splits into **Situations** (tap any that apply, OR'd) and **Type & marks** (per-tag Only/Never, AND'd) — replacing the three-state cycle. Old sticky filters migrate into the new shape on load
+- Fixed: the filter sheet splits into **Situations** (tap any that apply, OR'd) and **Type & marks** (per-tag Require/Never, AND'd) — replacing the three-state cycle. Old sticky filters migrate into the new shape on load
+- Fixed: "Only" renamed to "Require" — clearer that several Require tags all have to hold at once, not that only one does
+- The library can now be filtered the same way the draw is — a filter chip alongside search, sort and the graveyard toggle
+- Fixed: a tag on a card only turns brass when it's part of your active filter selection, not just because it's a situation — drawing no longer paints every situation tag orange regardless of what you asked for
+- Removed A–Z from the library sort order, down to Recent / Most useful / Most drawn
 
 ## Bugs
 
