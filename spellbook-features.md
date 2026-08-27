@@ -75,6 +75,10 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 - **Hypothetical counts in Type & marks.** Once any filter is active (a situation picked, or another tag Required/Never'd), every Type & marks row crosses out its plain count and shows what the pool would shrink to if that tag were *also* Required — combining with the current situations (OR'd) and current Require set (AND'd). A tag already set to Never shows 0, correctly, since requiring and forbidding the same tag can't both hold.
 - **Tag kind is now editable, not hardcoded.** Whether a tag lives in Situations (OR'd) or Type & marks (its own Require/Never) used to be fixed by membership in the `SITUATIONS` list. The tag manager now has a Situation / Type & mark toggle for any tag; a choice that diverges from the default is stored as an override, so new tags still classify correctly without needing an entry anywhere. Switching a tag's kind migrates it out of whichever filter bucket (Situations/Require/Never) no longer applies to it — Situations has no Never, so that clears; Require carries across to Situations' OR-selection and back.
 - **Text notes on a spell.** A sixth quick-action (a speech bubble) on every card, alongside useful/flag/desk/source/bury — opens a short sheet, nothing but a textarea, so logging what happened stays as fast as marking a spell useful. Notes accumulate as a thread rather than replacing each other; each carries its own timestamp. Reading the thread is the extra step this was designed to avoid cluttering the card with: a **Notes** button on the spell's detail sheet (tap a row in the library), showing the count once there's at least one, opens the full thread oldest-first with a composer at the bottom for the next entry. A note can be deleted from the thread. Storage shape is deliberately generic — `{id, type, text, createdAt}` — so a queued voice note can land in the same array as `{type:'voice', file}` without restructuring anything. Made room for the sixth icon by dropping the "useful" text label — the heart now shows only a count once it has one, icon-only otherwise, same as the other five actions.
+- **Voice notes on a spell.** A *Say it instead* button in both note composers; the recording itself is native Kotlin, because the web layer can ask for a microphone but not choose which one, and choosing is most of the point. Audio lands in `files/media/` as one AAC file per note, with only the filename on the note — a voice note is `{type:'voice', file, duration}` in the same thread as the text ones, exactly the slot the notes array was shaped for. Plays back in the thread over the app's own internal origin, so nothing had to loosen file access. Records through a Bluetooth headset when one is connected, off a toggle in the Vault, and **the recorder names the microphone it is actually on while you record** rather than the one it asked for — the first version reported the request and was wrong about it. Deleting a note deletes its audio; audio no note refers to is swept at boot. Not available in desktop preview, where there's no bridge to record through.
+- **A backup folder you choose.** Vault → *Backup folder*, picked once and remembered. The book plus every recording is copied there once a day, riding along on an ordinary save the way the weekly export already did: dated JSON snapshots, fourteen kept, and `media/` as a mirror — each recording copied once and never again, matched by stem so a provider renaming the extension can't turn the mirror into a pile of duplicates. Point it at a folder some sync app already watches and the offsite copy needs no code here. Pick nothing and the weekly Downloads export carries on unchanged, so the app is never less safe than it was. The export itself still carries no audio, and a book restored from one shows those notes as *recording lost*.
+- **The home screen widget.** One spell, changing at midnight, tapping opens the book. Native Kotlin reading `spellbook.json` directly — the thing the plain file was always for. Read-only: nothing on the home screen counts as a draw, so it can't race the WebView's save. Which spell you get is derived rather than stored — the day number seeds the pick, so every refresh inside a day agrees, and the three weeks before it are recomputed to keep a spell from coming round twice in a week. Draw weights apply, sticky filters don't. Spec below.
+- **minSdk raised to 31.** Voice notes route microphone input with `setCommunicationDevice`, which arrived in Android 12. The deprecated `startBluetoothSco` path it replaces wasn't worth carrying for a personal app on a phone running 16.
 
 ## Bugs
 
@@ -86,16 +90,13 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 
 ## Next
 
-- **Voice notes on a spell.** Spec below. In progress.
-- **A backup folder you choose.** Spec below. Ships with voice notes, since it's what carries the audio.
 - **Two kinds of import.** Spec below.
 - **Weighted draw**, defaulting to favouring the never-drawn. One switch, reversible.
 - **Exhume.** Occasionally the draw offers something buried, marked as such. Keeps burial from feeling final.
 
 ## Later
 
-- **Home screen widget.** A spell in peripheral vision, changing daily. The reason the store is a plain file.
-- **Notifications at set intervals.** A spell arriving unbidden — closer to the original wish than anything requiring you to open an app. `POST_NOTIFICATIONS` on Android 13+, periodic work rather than exact alarms. The notification picks its own spell, so Kotlin reads the book file directly. *This is the same capability the widget needs — build either and the other is nearly free.*
+- **Notifications at set intervals.** A spell arriving unbidden — closer to the original wish than anything requiring you to open an app. `POST_NOTIFICATIONS` on Android 13+, periodic work rather than exact alarms. *Most of this is now built: `Book.spellOfTheDay` is the read, and `SpellWidget` already owns an alarm that survives reboots and clock changes. What's left is the permission prompt, a channel, and deciding whether a notification draws its own spell or carries the one the widget is showing.*
 - **Dark spells.** Spec below.
 - **Android share target** — highlight text anywhere, share into the inbox.
 - **The djinn.** Spec below.
@@ -144,7 +145,7 @@ The threshold for adding a spell should be near zero, but a spell that just arri
 
 This is separate from the **Weighted draw** queued above, which is about favouring the never-drawn generally, independent of any tag.
 
-## Voice notes
+## Voice notes — shipped
 
 A note you speak instead of type. It lands in the same thread as the text ones,
 carries the same timestamp, deletes the same way. A text note is
@@ -263,7 +264,7 @@ pattern first — the web layer must never be able to name a path.
 sits beside, or whether the recording alone is the artefact. Deferred until the
 djinn exists and there's something to try it with.
 
-## Backups — a folder you choose
+## Backups — a folder you choose, shipped
 
 The automatic weekly JSON copy to Downloads was insurance built when the book
 was the only thing worth insuring. Audio changes that, and Downloads is the
@@ -312,6 +313,55 @@ also caps at 25MB, which audio would eat.
 
 **Nothing changes if you don't set a folder.** The weekly Downloads export
 stays exactly as it is, so the app is never less safe than it was.
+
+## The widget — shipped
+
+One spell on the home screen, changing at midnight. `SpellWidget.kt` is the
+whole of it: an `AppWidgetProvider`, a `Book` object that reads the JSON, and a
+layout that is the draw screen's card with everything that doesn't survive at
+that size taken out — brass rule, spell in serif, sigil and situations in the
+footer.
+
+**It never writes.** No `drawn`, no `lastDrawn`, nothing the WebView could be
+mid-save on. A spell seen on the home screen for a day hasn't been drawn; it's
+been in the corner of your eye, which isn't the same event and shouldn't share a
+counter.
+
+**The pick is derived, not stored.** `dayNumber()` — local days since the epoch
+— seeds a splitmix64 scramble, and that seeds the weighted draw. Same day, same
+spell, whatever wakes the widget; no state to keep, nothing to migrate, and the
+same principle as `question` and `untagged`. To keep a spell from coming round
+twice in a week the walk starts three weeks back and replays each day forward,
+excluding the seven before it. The warm-up has to be longer than the window it
+enforces: reconstructing yesterday from a seven-day walk gives yesterday a
+shorter history than it actually had, and a reconstruction that disagrees with
+what you saw lets a repeat through. At three weeks, ten years of days against
+the current book produce none.
+
+**Weights yes, filters no.** `inboxWeight` and `flaggedWeight` apply, so the
+home screen honours the same dials as the draw. The sticky filters don't: they
+describe where you are while browsing, and a widget stuck on `spiralling`
+because that's what you last opened the library with would be a bug wearing a
+feature's clothes.
+
+**Midnight is our own alarm, not the widget schedule.** `updatePeriodMillis`
+can't go below thirty minutes and doesn't fire while the phone sleeps — wrong on
+both counts for a thing that changes once a day. `setAndAllowWhileIdle` on an
+inexact alarm costs one wake a day, needs none of the exact-alarm permission
+Android 12 put behind a prompt, and lands within a few minutes of midnight.
+Boot, a clock change, a timezone change and an app update all re-arm it, and
+`save()` refreshes the widget so burying the spell you're looking at takes it off
+the home screen immediately.
+
+**Type sizes itself.** Spells run from four words to a paragraph and the widget
+is whatever size you dragged it to, so the TextView autosizes between 12 and
+21sp rather than picking a size in code. The editor's `**bold**`, `*italic*` and
+`==highlight==` come across as spans.
+
+Open: whether a long-press should offer a re-roll, and whether tapping should
+land on that spell's detail sheet rather than the app — the second needs an
+intent extra through `MainActivity` into the page, which is the first thing the
+widget would have to ask of the web app.
 
 ## Dark spells
 

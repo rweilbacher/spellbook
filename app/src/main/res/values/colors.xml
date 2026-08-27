@@ -2,4 +2,13 @@
 <resources>
     <color name="void_bg">#101216</color>
     <color name="brass">#C4A05A</color>
+
+    <!-- The rest of the web app's palette, needed now that the widget draws
+         outside the WebView. Keep these in step with the :root block in
+         assets/index.html. -->
+    <color name="slate">#191C22</color>
+    <color name="line">#2C313A</color>
+    <color name="ink">#E6E1D7</color>
+    <color name="muted">#8A8F9A</color>
+    <color name="dim">#5F646E</color>
 </resources>

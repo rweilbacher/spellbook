@@ -15,7 +15,7 @@ import java.util.Locale
  * The whole persistence layer: one JSON file in the app's private directory,
  * plus a media folder beside it for voice notes.
  *
- * Deliberately not IndexedDB. A file can be read by a home-screen widget later,
+ * Deliberately not IndexedDB. A file can be read by the home-screen widget,
  * copied out as a backup, and carried into a native rewrite without migration.
  * At ~150 spells the file is around 100KB, so rewriting it on every edit is
  * free — which is exactly why audio never goes in it.
@@ -49,6 +49,10 @@ class SpellbookBridge(private val act: MainActivity) {
             if (!tmp.renameTo(book)) book.writeText(json)
             rollBackup(json)
             offsite(json)
+            // The widget reads this file for itself, so a spell buried or
+            // edited here shows up on the home screen now rather than at the
+            // next midnight. Cheap when no widget is placed.
+            SpellWidget.refresh(ctx)
         }
     }
 

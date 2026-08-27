@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  updatePeriodMillis is 0 on purpose. The system's own widget schedule can't go
+  under 30 minutes and won't run while the phone sleeps — wrong on both counts
+  for something that changes once, at midnight. SpellWidget sets its own alarm.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="110dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="55dp"
+    android:maxResizeWidth="500dp"
+    android:maxResizeHeight="320dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="2"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_spell"
+    android:previewLayout="@layout/widget_spell"
+    android:description="@string/widget_description" />

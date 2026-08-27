@@ -83,8 +83,22 @@ it private. If you'd rather it didn't, delete the array between the `SEED`
 markers near the top of the script block, leaving `const SEED = [];`, and load
 your spells with **Import** on the device instead.
 
-## Later: a home screen widget
+## The home screen widget
 
-The reason the data is a plain JSON file rather than IndexedDB. A widget is
-native Kotlin and can read that file directly; it could not read a browser
-database. Nothing in the current app needs to change to add one.
+**Spell of the day** — long-press the home screen, *Widgets*, Spellbook. One
+spell, turning over at midnight, tap to open the book. Resizable; the type finds
+its own size for the space you give it.
+
+This is what the plain JSON file was for. The widget is native Kotlin reading
+`files/spellbook.json` directly, which it could not do against a browser
+database.
+
+It only ever reads. Nothing on the home screen counts as a draw, so `drawn` and
+`lastDrawn` stay the app's, and there's no way for the widget to race the
+WebView's save. Which spell you get isn't stored either — the day number seeds
+the pick, so every refresh inside a day lands on the same spell, and the three
+weeks before it are recomputed the same way so nothing repeats inside a week.
+
+The app's draw weights apply (`inbox` over-represented, `flagged` dialled down).
+Your sticky filters deliberately don't: those are where you are while browsing,
+not a standing instruction about the home screen.

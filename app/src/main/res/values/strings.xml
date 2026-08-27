@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Spellbook</string>
+
+    <!-- Home screen widget -->
+    <string name="widget_label">Spell of the day</string>
+    <string name="widget_description">One spell in the corner of your eye, turning over at midnight.</string>
+    <string name="widget_empty">The book is empty.</string>
+    <!-- Only ever seen in the widget picker and for the blink before the first
+         update; the real spell replaces both. -->
+    <string name="widget_preview">Retrieval is by situation, not subject.</string>
+    <string name="widget_preview_tags">ARRIVING  ·  PRACTICE</string>
 </resources>
