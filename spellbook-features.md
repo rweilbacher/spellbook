@@ -69,6 +69,7 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 - The library can now be filtered the same way the draw is — a filter chip alongside search, sort and the graveyard toggle
 - Fixed: a tag on a card only turns brass when it's part of your active filter selection, not just because it's a situation — drawing no longer paints every situation tag orange regardless of what you asked for
 - Removed A–Z from the library sort order, down to Recent / Most useful / Most drawn
+- **The desk** — a fifth quick-action (a pin) on every card, alongside useful/review/source/bury. Its own nav tab, most-recent-first. Falls off after three days into a fading **recently decayed** shelf, gone three days after that. Re-pinning — the same action, on either shelf — refreshes the clock and rescues a fading spell back to the top. Stored as a timestamp only, so decay needs no cleanup job. The pin lights brass, the decayed shelf desaturates and dims, and the desk's header carries a faint lamp glow.
 
 ## Bugs
 
@@ -81,7 +82,6 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 ## Next
 
 - **Two kinds of import.** Spec below.
-- **The desk.** Spec below.
 - **Weighted draw**, defaulting to favouring the never-drawn. One switch, reversible.
 - **Text notes on a spell.** Any spell can accumulate what happened when you used it. Over a year this is the most interesting data in the book.
 - **Exhume.** Occasionally the draw offers something buried, marked as such. Keeps burial from feeling final.
@@ -120,17 +120,6 @@ One menu item doing two incompatible jobs is what caused the lost counts. Split 
 **Import spells** — merges, roughly as it does now. Known ids get their text and authored tags updated. Unknown ids are appended. Counts take the maximum of stored and incoming rather than being skipped. A buried spell is never resurrected by a merge. This is the path for pulling in a fresh export from the vault, or someone else's spells.
 
 The distinction to keep straight: restore trusts the file completely, merge trusts the phone.
-
-## The desk
-
-A short-term working set. **Not** derived from what's been drawn — putting a spell on the desk is a deliberate act, a quick action on the card. Drawing something doesn't desk it; noticing that it matters right now does.
-
-- Most recent on top.
-- Falls off after about three days, into a **recently decayed** shelf that holds it a few days more before it's gone.
-- Re-desking refreshes the clock.
-- Stored as a timestamp on the spell, null when not desked. Decay is computed from it, so nothing needs a cleanup job.
-
-What it's for: the draw is a series of disconnected moments, and the desk gives it a few days of continuity. The thing you decided mattered on Tuesday is still there on Thursday without searching for it.
 
 ## The inbox
 

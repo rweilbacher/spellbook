@@ -192,6 +192,22 @@ button.tag:active{border-color:var(--brass-dim)}
   font-variant-numeric:tabular-nums}
 .seg button.on{background:var(--raise);color:var(--brass)}
 
+/* ---------- desk ---------- */
+.desk-glow{position:relative}
+.desk-glow::after{content:'';position:absolute;left:50%;top:50%;
+  transform:translate(-50%,-50%);width:280px;height:120px;pointer-events:none;z-index:-1;
+  background:radial-gradient(ellipse at center, var(--brass-glow), transparent 72%);opacity:.9}
+.desk-list{display:flex;flex-direction:column;gap:14px;padding:8px 0 4px}
+.badge{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);margin:-4px 0 12px}
+.card.decaying{opacity:.58;filter:saturate(.5) sepia(.15)}
+.card.decaying::before{background:linear-gradient(180deg,var(--brass-dim),transparent 85%);opacity:.4}
+.card.decaying .badge{color:var(--brass-dim)}
+.decay-divider{display:flex;align-items:center;gap:10px;margin:26px 0 14px;color:var(--dim)}
+.decay-divider::before,.decay-divider::after{content:'';flex:1;height:1px;background:var(--line)}
+.decay-divider span{font-size:11px;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap}
+.act.pinned{animation:pin .45s cubic-bezier(.3,1.4,.4,1)}
+@keyframes pin{0%{transform:scale(1)}45%{transform:scale(1.3)}100%{transform:scale(1)}}
+
 /* ---------- sheet ---------- */
 .scrim{position:fixed;inset:0;background:#080a0ccc;backdrop-filter:blur(3px);z-index:50;
   animation:fade .2s}
@@ -275,6 +291,12 @@ button.tag:active{border-color:var(--brass-dim)}
     <div class="results" id="results"></div>
   </section>
 
+  <!-- ============ DESK ============ -->
+  <section class="screen hide" id="desk">
+    <div class="hdr desk-glow"><h1>The desk</h1><span class="count" id="deskCount"></span></div>
+    <div id="deskBody"></div>
+  </section>
+
   <!-- ============ LIBRARY ============ -->
   <section class="screen hide" id="library">
     <div class="hdr"><h1 id="libTitle">The book</h1><span class="count" id="libCount"></span></div>
@@ -300,6 +322,8 @@ button.tag:active{border-color:var(--brass-dim)}
   <nav>
     <button data-tab="draw" class="on">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg>Draw</button>
+    <button data-tab="desk">
+      <svg viewBox="0 0 24 24"><path d="M8 9L10 4h4l2 5z"/><path d="M12 9v8"/><path d="M8 20h8"/></svg>Desk</button>
     <button data-tab="library">
       <svg viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 015.5 4H10v16H5.5A1.5 1.5 0 014 18.5z"/><path d="M20 5.5A1.5 1.5 0 0018.5 4H14v16h4.5a1.5 1.5 0 001.5-1.5z"/></svg>Book</button>
     <button data-tab="tags">
@@ -361,6 +385,34 @@ function computed(s){
 /* Stored tags plus computed ones — what the app shows and filters on. */
 function tagsOf(s){ return [...s.tags, ...computed(s)]; }
 
+/* The desk — a short-term working set, deliberately placed there by a card
+   quick-action, never derived from the draw. Decay is computed from the
+   stored timestamp every time it's needed, so nothing needs a cleanup job. */
+const DESK_DAYS = 3;      // days shown as fresh, on the desk
+const DECAY_DAYS = 3;     // extra days lingering, fading, before it's gone
+const DAY_MS = 24*60*60*1000;
+
+function deskState(s){
+  if(!s.desked) return null;
+  const age = Date.now() - new Date(s.desked).getTime();
+  if(age < DESK_DAYS*DAY_MS) return 'desk';
+  if(age < (DESK_DAYS+DECAY_DAYS)*DAY_MS) return 'decaying';
+  return null;
+}
+function deskList(){ return active().filter(s => deskState(s)==='desk').sort((a,b)=>new Date(b.desked)-new Date(a.desked)); }
+function decayList(){ return active().filter(s => deskState(s)==='decaying').sort((a,b)=>new Date(b.desked)-new Date(a.desked)); }
+function deskAgeLabel(s){
+  const days = Math.floor((Date.now()-new Date(s.desked).getTime())/DAY_MS);
+  if(days<=0) return 'placed today';
+  if(days===1) return 'placed yesterday';
+  return `placed ${days} days ago`;
+}
+function decayLabel(s){
+  const days = Math.floor((Date.now()-new Date(s.desked).getTime())/DAY_MS);
+  const left = Math.max(1, DESK_DAYS+DECAY_DAYS-days);
+  return `fading — gone in ${left===1?'a day':left+' days'}`;
+}
+
 let doc, S;           // document + settings
 let recent = [];      // ids drawn recently (no-repeat window)
 let cooling = false;
@@ -377,6 +429,7 @@ function boot(){
   if(!Array.isArray(S.require)) S.require = [];
   migrateReviewTag();
   migrateFilterSchema();
+  migrateDeskField();
   renderAll();
 }
 
@@ -416,6 +469,15 @@ function migrateReviewTag(){
   S.include = S.include.filter(t => t !== 'review');
   S.exclude = S.exclude.filter(t => t !== 'review');
   if(touched || S.include.length + S.exclude.length !== before) persist();
+}
+
+/* One-time migration: older spells (and the seed) predate the desk field
+   entirely. Give every spell an explicit null so deskState() always has
+   something to read. */
+function migrateDeskField(){
+  let touched = false;
+  for(const s of doc.spells){ if(s.desked === undefined){ s.desked = null; touched = true; } }
+  if(touched) persist();
 }
 function persist(){
   doc.exportedAt = new Date().toISOString();
@@ -537,9 +599,10 @@ function recharge(){
    Card rendering
    ========================================================================= */
 function card(s, opt={}){
-  const o = Object.assign({delay:0, from:'draw', open:false}, opt);
+  const o = Object.assign({delay:0, from:'draw', open:false, decaying:false, badge:null}, opt);
   return `
-  <article class="card${o.delay!==undefined?' rise':''}" style="animation-delay:${o.delay}ms" data-id="${s.id}">
+  <article class="card${o.delay!==undefined?' rise':''}${o.decaying?' decaying':''}" style="animation-delay:${o.delay}ms" data-id="${s.id}">
+    ${o.badge ? `<div class="badge">${esc(o.badge)}</div>` : ''}
     <p class="spell ${sizeClass(s.text)}">${fmt(s.text)}</p>
     ${tagsOf(s).length ? `<div class="tags">${tagsOf(s).map(t=>
       `<button class="tag${isActiveFilter(t)?' brass':''}" data-act="tag" data-tag="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}
@@ -550,6 +613,9 @@ function card(s, opt={}){
       </button>
       <button class="act${s.tags.includes('needs-review')?' on':''}" data-act="review" aria-label="Mark needs review">
         <svg viewBox="0 0 24 24"><path d="M5 21V4"/><path d="M5 4h12l-3 4 3 4H5z"/></svg>
+      </button>
+      <button class="act${deskState(s)?' on':''}" data-act="desk" aria-label="Place on the desk">
+        <svg viewBox="0 0 24 24"><path d="M8 9L10 4h4l2 5z"/><path d="M12 9v8"/><path d="M8 20h8"/></svg>
       </button>
       <button class="act" data-act="source">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
@@ -572,6 +638,7 @@ function sourceHtml(s){
   if(src.note && src.capturedAt && !src.note.startsWith(src.capturedAt)) rows.push(['Note', esc(src.note)]);
   if(src.file) rows.push(['File', esc(src.file) + (src.line ? ':' + src.line : '')]);
   if(src.url) rows.push(['Link', `<a href="${esc(src.url)}" target="_blank" rel="noreferrer">${esc(src.url)}</a>`]);
+  if(deskState(s)) rows.push(['Desk', esc(deskState(s)==='decaying' ? decayLabel(s) : deskAgeLabel(s))]);
   rows.push(['Drawn', s.drawn === 1 ? 'once' : s.drawn + ' times']);
   rows.push(['Useful', s.useful === 1 ? 'once' : s.useful + ' times']);
   return rows.map(([k,v])=>`<div><dt>${k}</dt><dd style="margin:0">${v}</dd></div>`).join('')
@@ -606,6 +673,15 @@ document.addEventListener('click', e => {
       `<button class="tag${isActiveFilter(t)?' brass':''}" data-act="tag" data-tag="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
     toast(on ? 'Needs-review mark removed' : 'Marked needs review');
     refreshQuiet();
+  }
+  if(act === 'desk'){
+    const already = !!deskState(s);
+    s.desked = now(); s.updatedAt = now(); persist();
+    btn.classList.add('on');
+    btn.classList.remove('pinned'); void btn.offsetWidth; btn.classList.add('pinned');
+    buzz(10);
+    toast(already ? 'Returned to the top of the desk' : 'Placed on the desk');
+    setTimeout(refreshQuiet, 420);
   }
   if(act === 'source'){
     const box = cardEl.querySelector('.source');
@@ -886,6 +962,7 @@ function manageTag(tag){
 function renderVault(){
   const a = active().length, g = buried().length;
   const untagged = active().filter(s => computed(s).includes('untagged')).length;
+  const onDesk = deskList().length, decaying = decayList().length;
   $('#vaultBody').innerHTML = `
     <button class="item" id="vAdd">
       <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
@@ -923,7 +1000,7 @@ function renderVault(){
 
     <div class="group"><span class="eyebrow">The book holds</span>
       <div class="item" style="cursor:default"><svg viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 015.5 4H10v16H5.5A1.5 1.5 0 014 18.5z"/><path d="M20 5.5A1.5 1.5 0 0018.5 4H14v16h4.5a1.5 1.5 0 001.5-1.5z"/></svg>
-        <span class="lab">${a} spells<span class="s">${untagged} without a situation · ${allTags().length} tags · ${active().reduce((n,s)=>n+s.useful,0)} marks of use</span></span></div>
+        <span class="lab">${a} spells<span class="s">${untagged} without a situation · ${allTags().length} tags · ${active().reduce((n,s)=>n+s.useful,0)} marks of use${onDesk||decaying?` · ${onDesk} on the desk${decaying?', '+decaying+' fading':''}`:''}</span></span></div>
     </div>
     ${Bridge ? '' : `<div class="banner">Preview mode. There's no storage bridge here, so anything you
       change lives in this tab only and vanishes on reload. Inside the Android shell it writes to a real file.</div>`}
@@ -939,6 +1016,35 @@ function renderVault(){
   $('#vaultBody').querySelectorAll('[data-dc]').forEach(b => b.onclick = () => {
     S.drawCount = +b.dataset.dc; persist(); renderVault(); renderFilterBar();
   });
+}
+
+/* =========================================================================
+   Desk — a short-term working set. Not derived from the draw: putting a
+   spell here is the pin quick-action on its card. Most recent on top;
+   after DESK_DAYS it slides into a fading 'recently decayed' shelf for
+   DECAY_DAYS more, then it's simply gone from both lists. Re-pinning a
+   fading spell (same quick-action) rescues it back to the top.
+   ========================================================================= */
+function renderDesk(){
+  const onDesk = deskList(), decaying = decayList();
+  $('#deskCount').textContent = onDesk.length + (onDesk.length===1?' spell':' spells');
+
+  if(!onDesk.length && !decaying.length){
+    $('#deskBody').innerHTML = `<div class="empty"><b>The desk is empty</b>
+      Pin the spell that matters right now — from the draw or the book — and it'll sit here for a few days.</div>`;
+    return;
+  }
+
+  let html = '';
+  html += onDesk.length
+    ? `<div class="desk-list">${onDesk.map((s,i)=>card(s,{delay:i*70,badge:deskAgeLabel(s)})).join('')}</div>`
+    : `<div class="empty" style="padding:34px 20px"><b>Nothing fresh right now</b>What's below is fading — re-pin one to keep it a while longer.</div>`;
+
+  if(decaying.length){
+    html += `<div class="decay-divider"><span>recently decayed</span></div>
+      <div class="desk-list">${decaying.map((s,i)=>card(s,{delay:i*70,badge:decayLabel(s),decaying:true})).join('')}</div>`;
+  }
+  $('#deskBody').innerHTML = html;
 }
 
 /* ---------- add / edit ---------- */
@@ -1009,7 +1115,7 @@ function editSpell(s, after){
     if(!text){ toast('A spell needs words'); return; }
     if(isNew){
       doc.spells.unshift({ id:uid(), text, tags:[...cur].sort(), useful:0, drawn:0, lastDrawn:null,
-        state:'active', createdAt:now(), updatedAt:now(),
+        state:'active', desked:null, createdAt:now(), updatedAt:now(),
         source:{origin:'manual', note:null, file:null, line:null, url:null, capturedAt:now().slice(0,10)} });
       toast('Written into the book');
     } else {
@@ -1097,7 +1203,7 @@ function importBook(e){
         const s = {
           id, text, tags:(raw.tags||[]).filter(t => !STRUCTURAL.includes(t)).slice().sort(),
           useful:raw.useful||0, drawn:raw.drawn||0, lastDrawn:raw.lastDrawn||null,
-          state:raw.state==='graveyard'?'graveyard':'active',
+          state:raw.state==='graveyard'?'graveyard':'active', desked:raw.desked||null,
           createdAt:raw.createdAt||now(), updatedAt:now(),
           source:raw.source || {origin:'import', note:null, file:null, line:null, url:null, capturedAt:null}
         };
@@ -1143,6 +1249,7 @@ function go(tab){
   if(tab === 'library') renderLibrary();
   if(tab === 'tags'){ tagEditMode = false; renderTags(); }
   if(tab === 'vault') renderVault();
+  if(tab === 'desk') renderDesk();
   if(tab === 'draw') renderFilterBar();
   document.querySelector('#'+tab).scrollTop = 0;
 }
@@ -1156,6 +1263,7 @@ function renderAll(){
   if(!$('#library').classList.contains('hide')) renderLibrary();
   if(!$('#tags').classList.contains('hide')) renderTags();
   if(!$('#vault').classList.contains('hide')) renderVault();
+  if(!$('#desk').classList.contains('hide')) renderDesk();
 }
 /* A spell shown on the draw screen must reflect an edit immediately. */
 function redrawCard(s){
@@ -1168,6 +1276,7 @@ function redrawCard(s){
 
 function refreshQuiet(){
   if(!$('#library').classList.contains('hide')) renderLibrary();
+  if(!$('#desk').classList.contains('hide')) renderDesk();
   renderFilterBar();
 }
 
