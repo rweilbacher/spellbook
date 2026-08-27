@@ -114,22 +114,43 @@ class Backups(private val ctx: Context) {
         }.getOrElse { result(false, "The backup didn't finish") }
     }
 
-    /** Only what isn't already there. Recordings never change once written, so
-     *  matching name and size is enough and saves re-copying the lot daily. */
+    /**
+     * One copy of each recording, ever — a backup that re-copied the lot daily
+     * would be worse than useless.
+     *
+     * Identity is the stem (`vn_ab12cd` out of `vn_ab12cd.m4a`), not the whole
+     * filename, because we don't own the name that ends up there: createFile
+     * hands the display name to the folder's provider, which is entitled to
+     * normalise the extension to match the MIME type. If it does, matching on
+     * the full name misses every single time — so every backup copies every
+     * recording again, and the provider dutifully uniquifies each one with a
+     * "(1)" suffix. Stems survive that.
+     *
+     * Recordings never change once written, so a stem that's already there with
+     * the right size is done. Anything else sharing that stem is a leftover
+     * from an interrupted copy, not a second backup, and goes.
+     */
     private fun copyMedia(root: DocumentFile, mediaDir: File): Int {
-        val local = mediaDir.listFiles().orEmpty().filter { it.isFile }
+        val local = mediaDir.listFiles().orEmpty()
+            .filter { it.isFile && VoiceRecorder.safeName(it.name) }
         if (local.isEmpty()) return 0
 
         val dir = root.listFiles().firstOrNull { it.name == MEDIA && it.isDirectory }
             ?: root.createDirectory(MEDIA)
             ?: return 0
 
-        val there = dir.listFiles().associateBy { it.name }
+        val there = dir.listFiles().filter { it.isFile }.groupBy { stem(it.name.orEmpty()) }
         var copied = 0
+
         for (f in local) {
-            val match = there[f.name]
-            if (match != null && match.length() == f.length()) continue
-            match?.delete()
+            val already = there[stem(f.name)].orEmpty()
+            val good = already.firstOrNull { it.length() == f.length() }
+            if (good != null) {
+                already.filter { it.uri != good.uri }.forEach { runCatching { it.delete() } }
+                continue
+            }
+            already.forEach { runCatching { it.delete() } }
+
             val out = dir.createFile("audio/mp4", f.name) ?: continue
             val ok = runCatching {
                 ctx.contentResolver.openOutputStream(out.uri)?.use { o ->
@@ -140,6 +161,8 @@ class Backups(private val ctx: Context) {
         }
         return copied
     }
+
+    private fun stem(name: String): String = name.substringBefore('.')
 
     /** Dated snapshots accumulate forever otherwise. Audio is never pruned —
      *  a recording whose note still exists must stay. */

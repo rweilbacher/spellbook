@@ -229,6 +229,26 @@ once a day and riding along on an ordinary save exactly as the weekly export
 does now: the book as `spellbook-YYYY-MM-DD.json`, and every audio file not
 already there, under `media/`. Fourteen dated snapshots kept.
 
+**The book is snapshotted; audio is mirrored.** Fourteen dated copies of a
+100KB JSON file is nothing. Fourteen copies of the recordings would be the
+whole point of the feature, wasted — so `media/` is a mirror, one copy of each
+recording, written once and never again.
+
+Getting that right is fiddlier than it sounds, because the app doesn't own the
+filename in that folder: it hands a display name to whatever provider backs it,
+and the provider may normalise the extension to match the MIME type. Match
+"already backed up" on the full filename and it can miss on every run — copying
+every recording again each day, each copy politely uniquified with a `(1)`.
+So identity is the stem, `vn_ab12cd`, which survives whatever happens to the
+extension. Anything else sharing a stem is a half-finished copy from an
+interrupted run, not a second backup, and is cleaned up on the next pass.
+
+**Deleting a note doesn't delete its backup.** A recording removed on the phone
+stays in the backup folder. That's the correct default — a backup that deletes
+what you deleted isn't insurance against deleting the wrong thing — but it does
+mean `media/` only ever grows, and it's the obvious thing to revisit if it ever
+gets big enough to notice.
+
 **Offsite is somebody else's problem, deliberately.** Point the folder at
 something a sync app already mirrors — Autosync, FolderSync, Syncthing — and
 the Drive copy happens with no code here at all. Talking to the Drive API
