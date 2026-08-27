@@ -7,17 +7,35 @@ android {
     namespace = "com.spellbook"
     compileSdk = 35
 
+    // A fixed key checked into the repo. Without this, each CI run generates a
+    // fresh debug keystore, every APK is signed by a different key, and Android
+    // refuses to install over the previous one — forcing an uninstall, which
+    // deletes the book. Not a secret: it only signs this app for this phone.
+    signingConfigs {
+        create("spellbook") {
+            storeFile = file("spellbook.keystore")
+            storePassword = "spellbook"
+            keyAlias = "spellbook"
+            keyPassword = "spellbook"
+            storeType = "PKCS12"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.spellbook"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("spellbook")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("spellbook")
         }
     }
 

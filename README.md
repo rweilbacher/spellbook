@@ -17,6 +17,26 @@ minutes a month the free plan includes; unlimited if the repo is public.
 Debug builds are signed with Android's standard debug key, which is fine for
 sideloading onto your own phone. A Play Store release would need a real keystore.
 
+## Updating without losing your book
+
+Every build is signed with `app/spellbook.keystore`, which is committed to this
+repo. That is what lets a new APK install *over* the old one, keeping your data.
+
+Without it, each CI run generates its own throwaway key, Android sees a
+signature mismatch and refuses the update — and uninstalling to get around that
+deletes `files/spellbook.json` and every backup with it.
+
+The keystore is not a secret. It signs a personal app for a personal phone. Do
+not delete or regenerate it: a new key means another forced uninstall.
+
+**One last uninstall is needed** to move from the old unsigned-consistently
+builds to this one. Before you do it: open the Vault, tap **Export the book**,
+and check the JSON is in your Downloads folder. Then uninstall, install the new
+APK, and use **Import spells**. Every update after that is install-over.
+
+You can confirm the fix in the Actions log — the "Show signing fingerprint" step
+prints a SHA-256 that should be byte-identical on every run.
+
 ## Iterating
 
 The only file you normally touch is `app/src/main/assets/index.html`. Edit it,
