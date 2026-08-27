@@ -83,6 +83,26 @@ it private. If you'd rather it didn't, delete the array between the `SEED`
 markers near the top of the script block, leaving `const SEED = [];`, and load
 your spells with **Import** on the device instead.
 
+## Reminders
+
+Vault → **Reminders**. Up to three times a day; tapping one opens the book at
+the sigil with nothing cast. The wording is yours — *The book is open. Where are
+you?* is only the default.
+
+The times live in `settings` inside `spellbook.json` like every other
+preference, so they ride along on the export and come back with a restore. That
+is also how the alarms get set after a reboot without the app being opened:
+Kotlin reads the same file the widget does.
+
+Android asks for permission the first time you set a time, and never otherwise.
+Refuse twice and the prompt stops appearing — the Vault then offers a way
+through to system settings, which is the only route back.
+
+The alarms are inexact, the same as the widget's midnight turn. A nudge set for
+09:00 can land at 09:04 if the phone is dozing. That buys freedom from the
+exact-alarm permission Android 12 put behind its own prompt, and a reminder is
+not a stopwatch.
+
 ## The home screen widget
 
 **Spell of the day** — long-press the home screen, *Widgets*, Spellbook. One

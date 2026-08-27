@@ -3,7 +3,9 @@ package com.spellbook
 import android.Manifest
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.ValueCallback
@@ -34,6 +36,7 @@ class MainActivity : ComponentActivity() {
     private var pendingFiles: ValueCallback<Array<Uri>>? = null
     private lateinit var picker: ActivityResultLauncher<Array<String>>
     private lateinit var micPermission: ActivityResultLauncher<String>
+    private lateinit var notifyPermission: ActivityResultLauncher<String>
     private lateinit var folderPicker: ActivityResultLauncher<Uri?>
 
     lateinit var voice: VoiceRecorder
@@ -43,6 +46,14 @@ class MainActivity : ComponentActivity() {
 
     private var pendingBluetooth = false
 
+    /**
+     * Where a reminder wants the page to land. Set before the WebView exists, so
+     * the page collects it for itself at boot rather than being told; written on
+     * the main thread and read from a binder thread, hence volatile.
+     */
+    @Volatile
+    private var pendingOpen: String? = null
+
     private val mediaDir: File get() = File(filesDir, "media")
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,6 +61,13 @@ class MainActivity : ComponentActivity() {
 
         // Draw behind the system bars; the CSS uses env(safe-area-inset-*) to compensate.
         WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        pendingOpen = intent?.getStringExtra(EXTRA_OPEN)
+
+        // Alarms don't survive a force-stop, and the receiver only hears about
+        // reboots and clock changes. Re-arming on every launch costs three
+        // AlarmManager calls and closes the last gap.
+        Reminders.arm(this)
 
         mediaDir.mkdirs()
         backups = Backups(this)
@@ -74,6 +92,13 @@ class MainActivity : ComponentActivity() {
         micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) voice.start(pendingBluetooth)
             else emit(JSONObject().put("kind", "voice").put("type", "denied"))
+        }
+
+        // Asked the first time a reminder time is set, never at launch. A book
+        // with no reminders never sees this prompt at all.
+        notifyPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) Reminders.arm(this)
+            emit(JSONObject().put("kind", "notify").put("granted", granted))
         }
 
         folderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -152,7 +177,55 @@ class MainActivity : ComponentActivity() {
         })
     }
 
+    /**
+     * A reminder tapped while the app is already up. `singleTask` means this,
+     * not a second onCreate — and by now the page is loaded, so it can simply
+     * be told rather than leaving something for it to collect.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val target = intent.getStringExtra(EXTRA_OPEN) ?: return
+        pendingOpen = target
+        emit(JSONObject().put("kind", "open").put("target", target))
+    }
+
     // --------------------------------------------------- called by the bridge
+
+    /** Read once and cleared: a reminder opens the draw the time it's tapped,
+     *  not again on the next reload. */
+    fun takeOpenRequest(): String {
+        val target = pendingOpen
+        pendingOpen = null
+        return target ?: ""
+    }
+
+    fun requestNotifyPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            emit(JSONObject().put("kind", "notify").put("granted", true))
+            return
+        }
+        runCatching { notifyPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }
+            .onFailure { emit(JSONObject().put("kind", "notify").put("granted", false)) }
+    }
+
+    /** The way back once Android has stopped asking — two refusals and the
+     *  prompt never appears again, and only settings can undo that. */
+    fun openNotificationSettings() {
+        runCatching {
+            startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            )
+        }.onFailure {
+            runCatching {
+                startActivity(
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                        .setData(Uri.fromParts("package", packageName, null))
+                )
+            }
+        }
+    }
 
     fun startVoiceNote(preferBluetooth: Boolean) {
         pendingBluetooth = preferBluetooth
@@ -212,6 +285,23 @@ class MainActivity : ComponentActivity() {
 
     // ------------------------------------------------------------- lifecycle
 
+    /**
+     * Coming back from Android's own notification settings is the one way the
+     * answer changes without us hearing about it — so the page is told, quietly,
+     * rather than going on insisting it's blocked.
+     */
+    override fun onResume() {
+        super.onResume()
+        if (::web.isInitialized) {
+            emit(
+                JSONObject()
+                    .put("kind", "notify")
+                    .put("granted", Reminders.canPost(this))
+                    .put("quiet", true)
+            )
+        }
+    }
+
     override fun onPause() {
         super.onPause()
         // Leaving the app finishes a note rather than losing it.
@@ -224,5 +314,12 @@ class MainActivity : ComponentActivity() {
         if (voice.isRecording) voice.cancel()
         web.destroy()
         super.onDestroy()
+    }
+
+    companion object {
+        /** Which screen the page should land on, when something other than the
+         *  launcher opened the app. */
+        const val EXTRA_OPEN = "com.spellbook.OPEN"
+        const val OPEN_DRAW = "draw"
     }
 }

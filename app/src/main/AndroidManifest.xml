@@ -7,9 +7,13 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
-    <!-- A reboot clears the widget's midnight alarm; this is how it gets re-set
-         without waiting for you to open the app. -->
+    <!-- A reboot clears the widget's midnight alarm and the reminder alarms;
+         this is how they get re-set without waiting for you to open the app. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Daily reminders. Asked for the first time you set one, never at launch;
+         with no times set the app never posts anything and never asks. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
@@ -51,6 +55,23 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/spell_widget_info" />
+        </receiver>
+
+        <!-- The daily reminders. The alarm itself arrives as an explicit intent
+             from our own PendingIntent and needs no filter; the four broadcasts
+             below are the ones that invalidate an armed alarm — a reboot, an
+             update, and either half of the clock moving. Exported because they
+             come from outside the app. Nothing they can trigger does more than
+             re-read the times and re-arm. -->
+        <receiver
+            android:name=".ReminderReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
         </receiver>
     </application>
 

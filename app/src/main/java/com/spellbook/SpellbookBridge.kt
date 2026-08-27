@@ -53,6 +53,10 @@ class SpellbookBridge(private val act: MainActivity) {
             // edited here shows up on the home screen now rather than at the
             // next midnight. Cheap when no widget is placed.
             SpellWidget.refresh(ctx)
+            // Reminder times live in this file too, so a save is also where a
+            // changed time reaches the alarm manager. Compares before it acts —
+            // the times change about twice a year, the book on every edit.
+            Reminders.syncFrom(ctx, json)
         }
     }
 
@@ -182,6 +186,36 @@ class SpellbookBridge(private val act: MainActivity) {
         }
         return gone
     }
+
+    // -------------------------------------------------------------- reminders
+
+    /**
+     * The times themselves are the page's — they're settings in the book it
+     * already holds. All Kotlin knows that the page doesn't is whether Android
+     * will actually let a notification through, which is what this answers.
+     */
+    @JavascriptInterface
+    fun notifyState(): String = runCatching {
+        JSONObject()
+            .put("canPost", Reminders.canPost(ctx))
+            .put("max", Reminders.MAX)
+            .put("defaultText", Reminders.DEFAULT_TEXT)
+            .toString()
+    }.getOrDefault("{\"canPost\":false,\"max\":3}")
+
+    @JavascriptInterface
+    fun requestNotifyPermission() {
+        act.runOnUiThread { act.requestNotifyPermission() }
+    }
+
+    @JavascriptInterface
+    fun openNotificationSettings() {
+        act.runOnUiThread { act.openNotificationSettings() }
+    }
+
+    /** Where a reminder tap wants the page to land, read once at boot. */
+    @JavascriptInterface
+    fun openRequest(): String = runCatching { act.takeOpenRequest() }.getOrDefault("")
 
     // ---------------------------------------------------------- backup folder
 
