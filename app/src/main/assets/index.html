@@ -111,6 +111,7 @@ nav button.on{color:var(--brass)}
 .spell.lg{font-size:22px}
 .spell.sm{font-size:17px;line-height:1.55}
 .spell b{font-weight:700;color:#f2eee6}
+.spell em{font-style:italic}
 .spell .mk{color:var(--brass);font-style:normal}
 
 .tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
@@ -204,6 +205,10 @@ button.tag:active{border-color:var(--brass-dim)}
 .field label{display:block;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
   color:var(--dim);font-weight:600;margin-bottom:7px}
 .help{font-size:12.5px;color:var(--dim);line-height:1.6;margin-top:9px}
+.fmtbar{display:flex;gap:6px;margin-bottom:7px}
+.fmtbar button{min-width:38px;padding:6px 11px;border:1px solid var(--line);border-radius:8px;
+  background:var(--void);color:var(--muted);font-size:13.5px}
+.fmtbar button:active{border-color:var(--brass-dim);color:var(--brass)}
 
 /* ---------- toast ---------- */
 #toast{position:fixed;left:50%;transform:translateX(-50%);
@@ -272,7 +277,9 @@ button.tag:active{border-color:var(--brass-dim)}
 
   <!-- ============ TAGS ============ -->
   <section class="screen hide" id="tags">
-    <div class="hdr"><h1>Tags</h1><span class="count" id="tagCount"></span></div>
+    <div class="hdr"><h1>Tags</h1>
+      <button class="chip" id="tagEdit" style="padding:6px 12px">Edit</button></div>
+    <div class="count" id="tagCount" style="padding-bottom:8px"></div>
     <div class="taggrid" id="tagGrid"></div>
   </section>
 
@@ -321,7 +328,7 @@ const SEED = [{"id":"sp_9e539136","text":"Ehm this is it\nThis is what I want","
 const DEFAULTS = { drawCount:1, include:[], exclude:[], noRepeat:12, sort:'recent' };
 const SITUATIONS = ['spiralling','stuck','avoiding','defending','disconnected','overwhelmed',
   'afraid','self-attacking','in-my-head','flat','rushing','wanting','with-her','among-people','arriving'];
-const FORM = ['practice','prompt','needs-review'];
+const FORM = ['practice','prompt','review','needs-review'];
 const STRUCTURAL = ['question','untagged'];   // computed, never stored
 
 /* Derived from the text as it is right now, so an edit can't leave them lying. */
@@ -365,6 +372,7 @@ const now = () => new Date().toISOString();
 function fmt(text){
   return esc(text)
     .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/==(.+?)==/g, '<i class="mk">$1</i>');
 }
 function sizeClass(t){
@@ -474,6 +482,9 @@ function card(s, opt={}){
         <svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.7-7.5-10a4.2 4.2 0 017.5-2.6A4.2 4.2 0 0119.5 10.5c0 5.3-7.5 10-7.5 10z"/></svg>
         <span class="n">${s.useful || 'useful'}</span>
       </button>
+      <button class="act${s.tags.includes('review')?' on':''}" data-act="review" aria-label="Mark for review">
+        <svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4.5L6 21z"/></svg>
+      </button>
       <button class="act" data-act="source">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
       </button>
@@ -517,6 +528,17 @@ document.addEventListener('click', e => {
     s.useful++; s.updatedAt = now(); persist(); buzz(10);
     btn.classList.add('on');
     btn.querySelector('.n').textContent = s.useful;
+    refreshQuiet();
+  }
+  if(act === 'review'){
+    const on = s.tags.includes('review');
+    s.tags = on ? s.tags.filter(t=>t!=='review') : [...s.tags,'review'].sort();
+    s.updatedAt = now(); persist(); buzz(10);
+    btn.classList.toggle('on', !on);
+    const box = cardEl.querySelector('.tags');
+    if(box) box.outerHTML = `<div class="tags">${tagsOf(s).map(t=>
+      `<button class="tag${SITUATIONS.includes(t)?' brass':''}" data-act="tag" data-tag="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
+    toast(on ? 'Review mark removed' : 'Marked for review');
     refreshQuiet();
   }
   if(act === 'source'){
@@ -676,14 +698,72 @@ function openTag(t){
 /* =========================================================================
    Tags screen
    ========================================================================= */
+let tagEditMode = false;
+
 function renderTags(){
-  const tags = allTags();
-  $('#tagCount').textContent = tags.length + ' tags';
+  const all = allTags();
+  const tags = tagEditMode ? all.filter(([t]) => !STRUCTURAL.includes(t)) : all;
+  $('#tagCount').textContent = tagEditMode
+    ? 'Tap a tag to rename or remove it. Computed tags aren\'t editable.'
+    : all.length + ' tags';
+  $('#tagEdit').textContent = tagEditMode ? 'Done' : 'Edit';
+  $('#tagEdit').classList.toggle('on', tagEditMode);
   $('#tagGrid').innerHTML = tags.map(([t,n]) =>
     `<button class="tagbtn${SITUATIONS.includes(t)?' struct':''}" data-t="${esc(t)}">
       <span class="nm">${esc(t)}</span><span class="ct">${n}</span></button>`).join('')
     || `<div class="empty"><b>No tags yet</b>Tags appear as you add them to spells.</div>`;
-  $('#tagGrid').querySelectorAll('[data-t]').forEach(b => b.onclick = () => openTag(b.dataset.t));
+  $('#tagGrid').querySelectorAll('[data-t]').forEach(b =>
+    b.onclick = () => tagEditMode ? manageTag(b.dataset.t) : openTag(b.dataset.t));
+}
+
+function manageTag(tag){
+  const held = doc.spells.filter(s => s.tags.includes(tag));
+  const taken = new Set(doc.spells.flatMap(s => s.tags));
+  sheet('Tag', `
+    <p class="spell lg" style="margin:4px 0 6px">${esc(tag)}</p>
+    <p class="help" style="margin:0">On ${held.length} ${held.length===1?'spell':'spells'}.</p>
+    <div class="field"><label>Rename</label>
+      <input id="tgName" value="${esc(tag)}" autocomplete="off" spellcheck="false"></div>
+    <button class="btn" id="tgSave">Rename</button>
+    <button class="btn danger" id="tgDel">Remove from all spells</button>
+    <button class="btn ghost" id="tgCancel">Cancel</button>
+  `);
+
+  $('#tgSave').onclick = () => {
+    const next = $('#tgName').value.trim().toLowerCase().replace(/\s+/g,'-');
+    if(!next){ toast('A tag needs a name'); return; }
+    if(next === tag){ closeSheet(); return; }
+    if(STRUCTURAL.includes(next)){ toast('That name is reserved'); return; }
+    // Merging two tags is deliberately not supported yet.
+    if(taken.has(next)){ toast('“' + next + '” already exists'); return; }
+    for(const s of held){
+      s.tags = s.tags.map(t => t === tag ? next : t).sort();
+      s.updatedAt = now();
+    }
+    if(libTag === tag) libTag = next;
+    S.include = S.include.map(t => t === tag ? next : t);
+    S.exclude = S.exclude.map(t => t === tag ? next : t);
+    persist(); closeSheet(); renderAll(); renderTags();
+    toast('Renamed to ' + next);
+  };
+
+  let armed = false;
+  $('#tgDel').onclick = () => {
+    if(!armed){
+      armed = true;
+      $('#tgDel').textContent = `Tap again to remove from ${held.length}`;
+      setTimeout(()=>{ armed = false;
+        const b = $('#tgDel'); if(b) b.textContent = 'Remove from all spells'; }, 3500);
+      return;
+    }
+    for(const s of held){ s.tags = s.tags.filter(t => t !== tag); s.updatedAt = now(); }
+    if(libTag === tag) libTag = null;
+    S.include = S.include.filter(t => t !== tag);
+    S.exclude = S.exclude.filter(t => t !== tag);
+    persist(); closeSheet(); renderAll(); renderTags();
+    toast('Removed ' + tag);
+  };
+  $('#tgCancel').onclick = closeSheet;
 }
 
 /* =========================================================================
@@ -754,6 +834,11 @@ function editSpell(s, after){
   const cur = new Set(s ? s.tags : []);
   sheet(isNew ? 'Write a spell' : 'Edit spell', `
     <div class="field"><label>The spell</label>
+      <div class="fmtbar">
+        <button data-wrap="**" style="font-weight:700">B</button>
+        <button data-wrap="*" style="font-style:italic;font-family:var(--serif)">I</button>
+        <button data-wrap="==" style="color:var(--brass)">highlight</button>
+      </div>
       <textarea id="eText" placeholder="What do you want to remember?">${s?esc(s.text):''}</textarea></div>
     <div class="field"><label>Tags</label>
       <div class="taggrid" id="eTags" style="padding:0 0 10px">
@@ -773,6 +858,25 @@ function editSpell(s, after){
     b.querySelector('.nm').style.color = cur.has(t)?'var(--brass)':'';
   };
   $('#eTags').querySelectorAll('[data-t]').forEach(wire);
+
+  /* Wrap the selection, or unwrap it if it's already wrapped. */
+  document.querySelectorAll('.fmtbar [data-wrap]').forEach(b => b.onclick = () => {
+    const ta = $('#eText'), m = b.dataset.wrap, n = m.length;
+    const a = ta.selectionStart, z = ta.selectionEnd, v = ta.value;
+    if(a === z){ ta.focus(); return; }
+    const sel = v.slice(a, z);
+    let out, from, to;
+    if(sel.startsWith(m) && sel.endsWith(m) && sel.length > n*2){
+      out = sel.slice(n, -n); from = a; to = a + out.length;
+    } else if(v.slice(a-n, a) === m && v.slice(z, z+n) === m){
+      ta.value = v.slice(0, a-n) + sel + v.slice(z+n);
+      ta.setSelectionRange(a-n, z-n); ta.focus(); return;
+    } else {
+      out = m + sel + m; from = a + n; to = z + n;
+    }
+    ta.value = v.slice(0, a) + out + v.slice(z);
+    ta.setSelectionRange(from, to); ta.focus();
+  });
   $('#eNew').onkeydown = e => {
     if(e.key !== 'Enter') return;
     e.preventDefault();
@@ -923,7 +1027,7 @@ function go(tab){
   document.querySelectorAll('.screen').forEach(s => s.classList.toggle('hide', s.id !== tab));
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   if(tab === 'library') renderLibrary();
-  if(tab === 'tags') renderTags();
+  if(tab === 'tags'){ tagEditMode = false; renderTags(); }
   if(tab === 'vault') renderVault();
   if(tab === 'draw') renderFilterBar();
   document.querySelector('#'+tab).scrollTop = 0;
@@ -961,12 +1065,14 @@ window.appBack = function(){
   if(!lib.classList.contains('hide') && (libTag || libGrave || $('#search').value)){
     libTag = null; libGrave = false; $('#search').value = ''; renderLibrary(); return true;
   }
+  if(tagEditMode && !$('#tags').classList.contains('hide')){ tagEditMode = false; renderTags(); return true; }
   const open = [...document.querySelectorAll('.screen')].find(s => !s.classList.contains('hide'));
   if(open && open.id !== 'draw'){ go('draw'); return true; }
   return false;
 };
 
 $('#sigilBtn').onclick = cast;
+$('#tagEdit').onclick = () => { tagEditMode = !tagEditMode; renderTags(); };
 $('#search').oninput = renderLibrary;
 document.addEventListener('keydown', e => { if(e.key === 'Escape') closeSheet(); });
 
