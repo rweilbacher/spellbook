@@ -781,13 +781,18 @@ document.addEventListener('click', e => {
   }
   if(act === 'flag'){
     const on = s.tags.includes(FLAGGED);
-    s.tags = on ? s.tags.filter(t=>t!==FLAGGED) : [...s.tags,FLAGGED].sort();
+    const leftInbox = !on && s.tags.includes('inbox');
+    s.tags = on ? s.tags.filter(t=>t!==FLAGGED) : [...s.tags.filter(t=>t!=='inbox'),FLAGGED].sort();
     s.updatedAt = now(); persist(); buzz(10);
     btn.classList.toggle('on', !on);
     const box = cardEl.querySelector('.tags');
     if(box) box.outerHTML = `<div class="tags">${tagsOf(s).map(t=>
       `<button class="tag${isActiveFilter(t)?' brass':''}" data-act="tag" data-tag="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
-    toast(on ? 'Unflagged' : 'Flagged');
+    if(leftInbox){
+      const badgeEl = cardEl.querySelector('.badge.untested');
+      if(badgeEl) badgeEl.remove();
+    }
+    toast(on ? 'Unflagged' : (leftInbox ? 'Flagged — left the inbox' : 'Flagged'));
     refreshQuiet();
   }
   if(act === 'desk'){
@@ -1400,6 +1405,11 @@ function editSpell(s, after){
     if(!t) return;
     cur.add(t); e.target.value = '';
     if(!$(`#eTags [data-t="${t}"]`)){
+      // Brand-new tag: default it into Situations rather than Type & mark
+      // (isSituationLike's fallback is SITUATIONS.includes(t), false for
+      // anything just typed here) so a freshly-created category shows up
+      // where most new tags belong, with no extra tap in the tag manager.
+      if(!SITUATIONS.includes(t)) S.tagKindOverrides[t] = 'situation';
       const b = document.createElement('button');
       b.className='tagbtn'; b.dataset.t=t; b.style.borderColor='var(--brass)';
       b.innerHTML = `<span class="nm" style="color:var(--brass)">${esc(t)}</span>`;

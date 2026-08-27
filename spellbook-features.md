@@ -99,6 +99,7 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 - **The djinn.** Spec below.
 - **Voice notes on a spell.** Microphone permission and a second bridge method; audio goes to its own files with only filenames in the JSON. Base64 in the book would take it from 100KB to megabytes, rewritten on every edit. The notes array shipped with this in mind — a voice note is just another entry, `{type:'voice', file}`, in the same thread as the text ones.
 - **Swipeable stack** for multi-spell draws, if scrolling three keeps feeling wrong.
+- **Add an image to a spell.** Same shape problem as voice notes: keep it out of the JSON. Store the picture in its own file (bridge method to write bytes from a data URL or picked file, mirroring how `save`/`export` already work) and keep only a filename on the spell. Needs a picker path in the editor — either the existing file-chooser plumbing in `MainActivity`, or a small camera/gallery intent — and a place to show it on the card and detail sheet.
 
 ## Someday — spellbooks in a room together
 
