@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -52,7 +53,17 @@ class MainActivity : ComponentActivity() {
 
         mediaDir.mkdirs()
         backups = Backups(this)
-        voice = VoiceRecorder(this) { emit(it) }
+        voice = VoiceRecorder(this, { emit(it) }) { active ->
+            // A screen that times out mid-note is a note that stops mid-note:
+            // onPause below saves what it has, and even without that, Android
+            // mutes the microphone for an app it considers backgrounded. The
+            // honest fix is a foreground service; keeping the screen lit for
+            // the length of a voice note is the proportionate one.
+            runOnUiThread {
+                if (active) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
 
         picker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             pendingFiles?.onReceiveValue(if (uri != null) arrayOf(uri) else null)

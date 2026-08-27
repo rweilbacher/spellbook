@@ -1023,7 +1023,7 @@ function micBtn(id){
    shut, if we came from the card's quick action. */
 function startVoiceNote(s, back){
   if(!canRecord()){ toast('Recording needs the app'); return; }
-  rec = { spell:s, back, ms:0, level:0, state:'arming', bluetooth:false };
+  rec = { spell:s, back, ms:0, level:0, state:'arming', bluetooth:false, via:'' };
   paintRecorder();
   try{ Bridge.startVoiceNote(!!S.btMic); }
   catch(e){ rec = null; toast('Could not start recording'); back(); }
@@ -1039,7 +1039,7 @@ function paintRecorder(){
       <div class="vdot${rec.state === 'recording' ? ' live' : ''}"></div>
       <div class="vtime" id="vTime">${esc(label)}</div>
       <div class="vmeter"><i id="vLevel"></i></div>
-      ${rec.bluetooth ? `<p class="via">Through your headset</p>` : ''}
+      ${rec.via && rec.via !== '…' ? `<p class="via">Through ${esc(rec.via)}</p>` : ''}
     </div>
     <button class="btn" id="vStop"${rec.state === 'recording' ? '' : ' disabled style="opacity:.45"'}>Stop and save</button>
     <button class="btn ghost" id="vDiscard">Discard</button>
@@ -1085,6 +1085,11 @@ window.onNative = function(raw){
     rec.state = 'recording'; rec.bluetooth = !!e.bluetooth; buzz(12); paintRecorder();
   }
   else if(e.type === 'level'){ rec.ms = e.ms || 0; rec.level = e.level || 0; paintLevel(); }
+  /* What the audio stack actually handed us, which is not always what we
+     asked it for — and can change under a note halfway through. */
+  else if(e.type === 'route'){
+    if(e.via !== rec.via){ rec.via = e.via; paintRecorder(); }
+  }
   else if(e.type === 'saved'){
     const r = done();
     addNoteToSpell(r.spell, {type:'voice', file:e.file, duration:e.duration});
