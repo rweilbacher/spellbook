@@ -328,14 +328,15 @@ const SEED = [{"id":"sp_9e539136","text":"Ehm this is it\nThis is what I want","
 const DEFAULTS = { drawCount:1, include:[], exclude:[], noRepeat:12, sort:'recent' };
 const SITUATIONS = ['spiralling','stuck','avoiding','defending','disconnected','overwhelmed',
   'afraid','self-attacking','in-my-head','flat','rushing','wanting','with-her','among-people','arriving'];
-const FORM = ['practice','prompt','review','needs-review'];
-const STRUCTURAL = ['question','untagged'];   // computed, never stored
+const FORM = ['practice','prompt','needs-review'];
+const STRUCTURAL = ['question','untagged','useful'];   // computed, never stored
 
 /* Derived from the text as it is right now, so an edit can't leave them lying. */
 function computed(s){
   const out = [];
   if(s.text.includes('?')) out.push('question');
   if(!s.tags.some(t => SITUATIONS.includes(t))) out.push('untagged');
+  if(s.useful > 0) out.push('useful');
   return out;
 }
 /* Stored tags plus computed ones — what the app shows and filters on. */
@@ -354,7 +355,27 @@ function boot(){
   }
   doc.settings = Object.assign({}, DEFAULTS, doc.settings || {});
   S = doc.settings;
+  migrateReviewTag();
   renderAll();
+}
+
+/* One-time migration: 'review' (the old bookmark quick-action) folds into
+   'needs-review' now that they mean the same thing. Dedupes if a spell
+   somehow already carries both, and follows sticky filters across. */
+function migrateReviewTag(){
+  let touched = false;
+  for(const s of doc.spells){
+    if(s.tags.includes('review')){
+      s.tags = [...new Set(s.tags.map(t => t==='review' ? 'needs-review' : t))].sort();
+      touched = true;
+    }
+  }
+  if(S.include.includes('review') && !S.include.includes('needs-review')) S.include.push('needs-review');
+  if(S.exclude.includes('review') && !S.exclude.includes('needs-review')) S.exclude.push('needs-review');
+  const before = S.include.length + S.exclude.length;
+  S.include = S.include.filter(t => t !== 'review');
+  S.exclude = S.exclude.filter(t => t !== 'review');
+  if(touched || S.include.length + S.exclude.length !== before) persist();
 }
 function persist(){
   doc.exportedAt = new Date().toISOString();
@@ -482,8 +503,8 @@ function card(s, opt={}){
         <svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.7-7.5-10a4.2 4.2 0 017.5-2.6A4.2 4.2 0 0119.5 10.5c0 5.3-7.5 10-7.5 10z"/></svg>
         <span class="n">${s.useful || 'useful'}</span>
       </button>
-      <button class="act${s.tags.includes('review')?' on':''}" data-act="review" aria-label="Mark for review">
-        <svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4.5L6 21z"/></svg>
+      <button class="act${s.tags.includes('needs-review')?' on':''}" data-act="review" aria-label="Mark needs review">
+        <svg viewBox="0 0 24 24"><path d="M5 21V4"/><path d="M5 4h12l-3 4 3 4H5z"/></svg>
       </button>
       <button class="act" data-act="source">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
@@ -531,14 +552,14 @@ document.addEventListener('click', e => {
     refreshQuiet();
   }
   if(act === 'review'){
-    const on = s.tags.includes('review');
-    s.tags = on ? s.tags.filter(t=>t!=='review') : [...s.tags,'review'].sort();
+    const on = s.tags.includes('needs-review');
+    s.tags = on ? s.tags.filter(t=>t!=='needs-review') : [...s.tags,'needs-review'].sort();
     s.updatedAt = now(); persist(); buzz(10);
     btn.classList.toggle('on', !on);
     const box = cardEl.querySelector('.tags');
     if(box) box.outerHTML = `<div class="tags">${tagsOf(s).map(t=>
       `<button class="tag${SITUATIONS.includes(t)?' brass':''}" data-act="tag" data-tag="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
-    toast(on ? 'Review mark removed' : 'Marked for review');
+    toast(on ? 'Needs-review mark removed' : 'Marked needs review');
     refreshQuiet();
   }
   if(act === 'source'){
