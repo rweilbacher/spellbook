@@ -74,6 +74,7 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 - **`needs-review` renamed to `flagged`**, and locked in the tag manager — can't be renamed or removed as a tag there (per-spell it still toggles freely from the card's flag action or the editor). The old `review` bookmark and `needs-review` both migrate to it on load. Gets its own draw-weight setting alongside inbox's (`flaggedWeight`, default 1 — no effect; try 0.8 to quietly draw flagged spells less often). The two weights multiply when a spell carries both tags.
 - **Hypothetical counts in Type & marks.** Once any filter is active (a situation picked, or another tag Required/Never'd), every Type & marks row crosses out its plain count and shows what the pool would shrink to if that tag were *also* Required — combining with the current situations (OR'd) and current Require set (AND'd). A tag already set to Never shows 0, correctly, since requiring and forbidding the same tag can't both hold.
 - **Tag kind is now editable, not hardcoded.** Whether a tag lives in Situations (OR'd) or Type & marks (its own Require/Never) used to be fixed by membership in the `SITUATIONS` list. The tag manager now has a Situation / Type & mark toggle for any tag; a choice that diverges from the default is stored as an override, so new tags still classify correctly without needing an entry anywhere. Switching a tag's kind migrates it out of whichever filter bucket (Situations/Require/Never) no longer applies to it — Situations has no Never, so that clears; Require carries across to Situations' OR-selection and back.
+- **Text notes on a spell.** A sixth quick-action (a speech bubble) on every card, alongside useful/flag/desk/source/bury — opens a short sheet, nothing but a textarea, so logging what happened stays as fast as marking a spell useful. Notes accumulate as a thread rather than replacing each other; each carries its own timestamp. Reading the thread is the extra step this was designed to avoid cluttering the card with: a **Notes** button on the spell's detail sheet (tap a row in the library), showing the count once there's at least one, opens the full thread oldest-first with a composer at the bottom for the next entry. A note can be deleted from the thread. Storage shape is deliberately generic — `{id, type, text, createdAt}` — so a queued voice note can land in the same array as `{type:'voice', file}` without restructuring anything. Made room for the sixth icon by dropping the "useful" text label — the heart now shows only a count once it has one, icon-only otherwise, same as the other five actions.
 
 ## Bugs
 
@@ -87,7 +88,6 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 
 - **Two kinds of import.** Spec below.
 - **Weighted draw**, defaulting to favouring the never-drawn. One switch, reversible.
-- **Text notes on a spell.** Any spell can accumulate what happened when you used it. Over a year this is the most interesting data in the book.
 - **Exhume.** Occasionally the draw offers something buried, marked as such. Keeps burial from feeling final.
 
 ## Later
@@ -97,7 +97,7 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 - **Dark spells.** Spec below.
 - **Android share target** — highlight text anywhere, share into the inbox.
 - **The djinn.** Spec below.
-- **Voice notes on a spell.** Microphone permission and a second bridge method; audio goes to its own files with only filenames in the JSON. Base64 in the book would take it from 100KB to megabytes, rewritten on every edit.
+- **Voice notes on a spell.** Microphone permission and a second bridge method; audio goes to its own files with only filenames in the JSON. Base64 in the book would take it from 100KB to megabytes, rewritten on every edit. The notes array shipped with this in mind — a voice note is just another entry, `{type:'voice', file}`, in the same thread as the text ones.
 - **Swipeable stack** for multi-spell draws, if scrolling three keeps feeling wrong.
 
 ## Someday — spellbooks in a room together

@@ -138,6 +138,19 @@ button.tag:active{border-color:var(--brass-dim)}
 .source dt{color:var(--dim);min-width:64px;flex-shrink:0}
 .source a{color:var(--brass);word-break:break-all}
 
+/* ---------- notes thread ---------- */
+.notes{display:flex;flex-direction:column}
+.note{padding:12px 0;border-bottom:1px solid var(--line)}
+.note:first-child{padding-top:0}
+.note:last-child{border-bottom:none}
+.note-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:5px}
+.note-meta span{font-size:11px;color:var(--dim);letter-spacing:.02em;font-variant-numeric:tabular-nums}
+.note-del{color:var(--dim);padding:4px}
+.note-del svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round}
+.note-del:active{color:#c47a68}
+.note-text{margin:0;font-size:14.5px;line-height:1.6;color:var(--ink);white-space:pre-wrap;word-break:break-word}
+.note-empty{color:var(--dim);font-size:13px;line-height:1.6;margin:0}
+
 /* ---------- filter bar ---------- */
 .filterbar{position:sticky;top:0;z-index:5;background:linear-gradient(var(--void) 72%,transparent);
   padding:12px 0 10px;display:flex;gap:8px;align-items:center;overflow-x:auto;scrollbar-width:none}
@@ -445,6 +458,7 @@ function boot(){
   migrateFilterSchema();
   migrateDeskField();
   migrateInboxTag();
+  migrateNotesField();
   renderAll();
 }
 
@@ -513,6 +527,18 @@ function migrateInboxTag(){
   doc.inboxSeeded = true;
   persist();   // always, even if nothing changed — the flag itself must be saved
 }
+
+/* One-time migration: notes are new. Give every spell an explicit empty
+   thread so nothing downstream has to guard against a missing array.
+   The shape is generic — { id, type, text, createdAt } — so a future
+   'voice' type can land in the same slot, its audio in its own file with
+   only the filename stored here, same as the rest of the book stays a
+   plain JSON file. */
+function migrateNotesField(){
+  let touched = false;
+  for(const s of doc.spells){ if(!Array.isArray(s.notes)){ s.notes = []; touched = true; } }
+  if(touched) persist();
+}
 function persist(){
   doc.exportedAt = new Date().toISOString();
   Store.save(doc);
@@ -524,6 +550,7 @@ const active = () => doc.spells.filter(s => s.state === 'active');
 const buried = () => doc.spells.filter(s => s.state === 'graveyard');
 const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const uid = () => 'sp_' + Math.random().toString(16).slice(2,10);
+const nid = () => 'nt_' + Math.random().toString(16).slice(2,10);
 const now = () => new Date().toISOString();
 
 function fmt(text){
@@ -679,9 +706,9 @@ function card(s, opt={}){
     ${tagsOf(s).length ? `<div class="tags">${tagsOf(s).map(t=>
       `<button class="tag${isActiveFilter(t)?' brass':''}" data-act="tag" data-tag="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}
     <div class="actions">
-      <button class="act${s.useful?' on':''}" data-act="useful">
+      <button class="act${s.useful?' on':''}" data-act="useful" aria-label="Mark useful">
         <svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.7-7.5-10a4.2 4.2 0 017.5-2.6A4.2 4.2 0 0119.5 10.5c0 5.3-7.5 10-7.5 10z"/></svg>
-        <span class="n">${s.useful || 'useful'}</span>
+        ${s.useful ? `<span class="n">${s.useful}</span>` : ''}
       </button>
       <button class="act${s.tags.includes(FLAGGED)?' on':''}" data-act="flag" aria-label="Flag">
         <svg viewBox="0 0 24 24"><path d="M5 21V4"/><path d="M5 4h12l-3 4 3 4H5z"/></svg>
@@ -689,10 +716,13 @@ function card(s, opt={}){
       <button class="act${deskState(s)?' on':''}" data-act="desk" aria-label="Place on the desk">
         <svg viewBox="0 0 24 24"><path d="M8 9L10 4h4l2 5z"/><path d="M12 9v8"/><path d="M8 20h8"/></svg>
       </button>
-      <button class="act" data-act="source">
+      <button class="act${(s.notes&&s.notes.length)?' on':''}" data-act="note" aria-label="Add a note">
+        <svg viewBox="0 0 24 24"><path d="M4 4.5h16v11H9l-4.5 4V4.5z"/><path d="M9 9h6M9 12.5h4"/></svg>
+      </button>
+      <button class="act" data-act="source" aria-label="Source">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
       </button>
-      <button class="act right" data-act="bury">
+      <button class="act right" data-act="bury" aria-label="Bury">
         <svg viewBox="0 0 24 24"><path d="M5 21V10a7 7 0 0114 0v11"/><path d="M12 21v-8M9 13h6"/></svg>
       </button>
     </div>
@@ -713,6 +743,7 @@ function sourceHtml(s){
   if(deskState(s)) rows.push(['Desk', esc(deskState(s)==='decaying' ? decayLabel(s) : deskAgeLabel(s))]);
   rows.push(['Drawn', s.drawn === 1 ? 'once' : s.drawn + ' times']);
   rows.push(['Useful', s.useful === 1 ? 'once' : s.useful + ' times']);
+  if(s.notes && s.notes.length) rows.push(['Notes', s.notes.length === 1 ? '1 note' : s.notes.length + ' notes']);
   return rows.map(([k,v])=>`<div><dt>${k}</dt><dd style="margin:0">${v}</dd></div>`).join('')
     + `<div style="margin-top:11px;gap:6px"><button class="tag" data-act="edit">edit spell</button></div>`;
 }
@@ -735,7 +766,9 @@ document.addEventListener('click', e => {
     if(leftInbox) s.tags = s.tags.filter(t=>t!=='inbox');
     persist(); buzz(10);
     btn.classList.add('on');
-    btn.querySelector('.n').textContent = s.useful;
+    let n = btn.querySelector('.n');
+    if(!n){ n = document.createElement('span'); n.className = 'n'; btn.appendChild(n); }
+    n.textContent = s.useful;
     if(leftInbox){
       const box = cardEl.querySelector('.tags');
       if(box) box.outerHTML = `<div class="tags">${tagsOf(s).map(t=>
@@ -766,6 +799,7 @@ document.addEventListener('click', e => {
     toast(already ? 'Returned to the top of the desk' : 'Placed on the desk');
     setTimeout(refreshQuiet, 420);
   }
+  if(act === 'note'){ openAddNote(s); }
   if(act === 'source'){
     const box = cardEl.querySelector('.source');
     if(box.classList.contains('hide')) box.innerHTML = sourceHtml(s);
@@ -781,6 +815,103 @@ document.addEventListener('click', e => {
   }
   if(act === 'edit'){ editSpell(s); }
 });
+
+/* =========================================================================
+   Notes — a thread that accumulates on a spell: what happened when you
+   used it, or an answer to what it asked. Adding one is a top-level quick
+   action (the card's note icon); reading the thread is an extra step,
+   behind the spell's detail sheet, so it doesn't clutter the card.
+
+   Shape is deliberately generic — { id, type, text, createdAt } — so a
+   future voice note can land in the same array as {type:'voice', file},
+   its audio in its own file with just the filename stored here, same as
+   everything else that isn't small stays out of the JSON.
+   ========================================================================= */
+function addNoteToSpell(s, note){
+  if(!Array.isArray(s.notes)) s.notes = [];
+  s.notes.push(Object.assign({ id:nid(), createdAt:now() }, note));
+  s.updatedAt = now();
+  persist();
+  redrawCard(s);
+  refreshQuiet();
+}
+
+/* The quick action: a short sheet, nothing but a textarea, so capture stays
+   as fast as marking a spell useful. */
+function openAddNote(s){
+  sheet('Add a note', `
+    <p class="help" style="margin-top:0">What happened when you used this — or an answer to what it asked.</p>
+    <div class="field" style="margin-top:9px"><textarea id="nText" placeholder="Write a note…"></textarea></div>
+    <button class="btn" id="nSave">Save note</button>
+    <button class="btn ghost" id="nCancel">Cancel</button>
+  `);
+  $('#nText').focus();
+  $('#nSave').onclick = () => {
+    const text = $('#nText').value.trim();
+    if(!text){ toast('A note needs words'); return; }
+    addNoteToSpell(s, {type:'text', text});
+    closeSheet();
+    toast('Note added');
+  };
+  $('#nCancel').onclick = closeSheet;
+}
+
+function noteTime(iso){
+  const d = new Date(iso);
+  if(isNaN(d)) return '';
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  const date = d.toLocaleDateString(undefined, {month:'short', day:'numeric', year: sameYear?undefined:'numeric'});
+  const time = d.toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'});
+  return `${date} · ${time}`;
+}
+
+/* type is read but not yet acted on beyond 'text' — the branch is here so
+   a 'voice' note (queued: mic permission, its own bridge method, audio in
+   its own file) has a slot to render into without restructuring this. */
+function noteHtml(n){
+  const body = n.type === 'voice'
+    ? `<div class="note-text" style="color:var(--dim)">🎙 voice note${n.duration?` · ${n.duration}s`:''}</div>`
+    : `<p class="note-text">${fmt(n.text || '')}</p>`;
+  return `<div class="note">
+    <div class="note-meta">
+      <span>${esc(noteTime(n.createdAt))}</span>
+      <button class="note-del" data-nid="${esc(n.id)}" aria-label="Delete note">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    ${body}
+  </div>`;
+}
+
+/* The extra step: the full thread, oldest first like a conversation,
+   with the composer for the next entry waiting at the bottom. */
+function openNotes(s, keep){
+  const notes = (s.notes || []).slice().sort((a,b) => (a.createdAt||'').localeCompare(b.createdAt||''));
+  sheet('Notes', `
+    <div class="notes" id="notesThread">
+      ${notes.length ? notes.map(noteHtml).join('')
+        : `<p class="note-empty">No notes yet — add the first one below.</p>`}
+    </div>
+    <div class="field" style="margin-top:${notes.length?'18px':'6px'}">
+      <label>Add a note</label>
+      <textarea id="nText2" placeholder="Write a note…"></textarea>
+    </div>
+    <button class="btn" id="nSave2">Save note</button>
+  `, null, keep);
+  const body = document.querySelector('.sheet .body');
+  if(body) body.scrollTop = body.scrollHeight;
+  $('#nSave2').onclick = () => {
+    const text = $('#nText2').value.trim();
+    if(!text){ toast('A note needs words'); return; }
+    addNoteToSpell(s, {type:'text', text});
+    openNotes(s, true);
+  };
+  document.querySelectorAll('#notesThread .note-del').forEach(b => b.onclick = () => {
+    s.notes = (s.notes || []).filter(n => n.id !== b.dataset.nid);
+    s.updatedAt = now(); persist(); redrawCard(s); refreshQuiet();
+    openNotes(s, true);
+  });
+}
 
 /* =========================================================================
    Filters
@@ -966,10 +1097,13 @@ function renderLibrary(){
 function openSpell(s){
   if(!s) return;
   const grave = s.state === 'graveyard';
+  const noteCount = (s.notes || []).length;
   sheet('Spell', `<div id="sheetCard">${card(s,{delay:undefined})}</div>
+    <button class="btn ghost" id="spNotes">${noteCount ? `Notes (${noteCount})` : 'Notes'}</button>
     <button class="btn ghost" id="spEdit">Edit</button>
     <button class="btn ${grave?'':'danger'}" id="spGrave">${grave?'Restore to the book':'Move to graveyard'}</button>`);
   $('#sheetCard .card').classList.remove('rise');
+  $('#spNotes').onclick = () => { closeSheet(); openNotes(s); };
   $('#spEdit').onclick = () => { closeSheet(); editSpell(s); };
   $('#spGrave').onclick = () => {
     s.state = grave ? 'active' : 'graveyard'; s.updatedAt = now(); persist();
@@ -1277,7 +1411,7 @@ function editSpell(s, after){
     if(!text){ toast('A spell needs words'); return; }
     if(isNew){
       doc.spells.unshift({ id:uid(), text, tags:[...cur].sort(), useful:0, drawn:0, lastDrawn:null,
-        state:'active', desked:null, createdAt:now(), updatedAt:now(),
+        state:'active', desked:null, notes:[], createdAt:now(), updatedAt:now(),
         source:{origin:'manual', note:null, file:null, line:null, url:null, capturedAt:now().slice(0,10)} });
       toast('Written into the book');
     } else {
@@ -1371,6 +1505,7 @@ function importBook(e){
           id, text, tags:tags.slice().sort(),
           useful:rawUseful, drawn:raw.drawn||0, lastDrawn:raw.lastDrawn||null,
           state:raw.state==='graveyard'?'graveyard':'active', desked:raw.desked||null,
+          notes:Array.isArray(raw.notes)?raw.notes:[],
           createdAt:raw.createdAt||now(), updatedAt:now(),
           source:raw.source || {origin:'import', note:null, file:null, line:null, url:null, capturedAt:null}
         };
