@@ -78,6 +78,12 @@
   </nav>
 </div>
 
+<!-- ============ RECOVERY ============
+     Shown instead of #app when the book is on disk and won't open. Outside
+     #app on purpose: nothing here should offer a way into a UI whose every
+     action ends in a write. Filled in by showRecovery(). -->
+<div id="recovery" class="hide" role="alertdialog" aria-label="The book didn't open"></div>
+
 <script src="./js/seed.js"></script>
 <script src="./js/store.js"></script>
 <script src="./js/util.js"></script>
@@ -86,14 +92,27 @@
 <script src="./js/reminders.js"></script>
 <script src="./js/sheet.js"></script>
 <script>
+/* notifyText is deliberately absent: the default wording is Kotlin's, and
+   the page reads it off notifyState() rather than keeping a second copy.
+   adoptSettings() fills it in. See notifyLimits() in js/reminders.js. */
 const DEFAULTS = { drawCount:1, include:[], require:[], exclude:[], noRepeat:12, sort:'recent',
-  inboxWeight:3, flaggedWeight:1, tagKindOverrides:{}, btMic:true,
-  notifyTimes:[], notifyText:'The book is open. Where are you?' };
-const NOTIFY_MAX = 3;                // Kotlin caps at the same number
+  inboxWeight:3, flaggedWeight:1, tagKindOverrides:{}, btMic:true, notifyTimes:[] };
+/* The shape of the file on disk. Stamped by persist(), read by
+   runMigrations() to decide what a book of unknown vintage still needs.
+   Bump it when a migration is added; the per-field guards stay as
+   belt-and-braces for books written before the stamp existed (it sat at 1
+   through five migrations).
+     1 — everything up to and including the notes field
+     2 — the stamp itself starts moving */
+const SCHEMA = 2;
 const SITUATIONS = ['spiralling','stuck','avoiding','defending','disconnected','overwhelmed',
   'afraid','self-attacking','in-my-head','flat','rushing','wanting','with-her','among-people','arriving'];
 const INBOX = 'inbox';
 const FLAGGED = 'flagged';           // formerly 'needs-review' — see migrateFlagTag
+/* The two values s.state ever holds. Buried, not burned: a spell moves
+   between these, it is never removed from the book. */
+const ACTIVE = 'active';
+const GRAVEYARD = 'graveyard';
 const FORM = ['practice','prompt',FLAGGED,INBOX];
 const STRUCTURAL = ['question','untagged','useful'];   // computed, never stored
 const PROTECTED = [FLAGGED];         // authored tags the tag manager won't rename or remove
@@ -162,22 +181,31 @@ let cooling = false;
 const COOL_MS = 6000;
 
 function boot(){
-  doc = Store.load();
-  if(!doc || !Array.isArray(doc.spells) || !doc.spells.length){
-    doc = { version:1, exportedAt:new Date().toISOString(), settings:{...DEFAULTS}, spells:JSON.parse(JSON.stringify(window.SEED || [])) };
-    Store.save(doc);
+  const found = Store.load();
+  if(found.state === 'ok' && !(found.doc && Array.isArray(found.doc.spells) && found.doc.spells.length)){
+    // Parsed, but there's no book in it. Burying moves a spell's state, it
+    // never removes one, so zero spells cannot be reached through the UI —
+    // an empty book is a corruption signal, not a first run.
+    found.state = 'corrupt';
+    found.error = found.error || 'the file parsed but holds no spells';
   }
-  doc.settings = Object.assign({}, DEFAULTS, doc.settings || {});
-  S = doc.settings;
-  if(!Array.isArray(S.require)) S.require = [];
-  if(!S.tagKindOverrides || typeof S.tagKindOverrides !== 'object') S.tagKindOverrides = {};
-  S.notifyTimes = cleanTimes(S.notifyTimes);
-  if(typeof S.notifyText !== 'string') S.notifyText = DEFAULTS.notifyText;
-  migrateFlagTag();
-  migrateFilterSchema();
-  migrateDeskField();
-  migrateInboxTag();
-  migrateNotesField();
+  if(found.state === 'corrupt' || found.state === 'unreadable'){
+    // Do not save. Do not seed. The file stays exactly as it is.
+    showRecovery(found);
+    return;
+  }
+
+  let dirty = false;
+  if(found.state === 'missing'){ doc = freshBook(); dirty = true; }
+  else doc = found.doc;
+
+  adoptSettings();
+  if(runMigrations()) dirty = true;
+  // One write for the whole of boot, however many migrations ran. Each save
+  // is a full pipeline in Kotlin — temp file, rename, daily snapshot, widget
+  // refresh, alarm sync — and boot used to fire up to six of them.
+  if(dirty) persist();
+
   refreshMedia();
   sweepMedia();
   renderAll();
@@ -186,6 +214,48 @@ function boot(){
   // before this script existed. A widget tap wants that spell's own detail
   // sheet instead — same channel, a different shape of answer.
   handleOpenRequest(openRequest());
+}
+
+/* A first run, and the only place the seed is ever used. */
+function freshBook(){
+  return { version:SCHEMA, exportedAt:now(), settings:{...DEFAULTS},
+    inboxSeeded:true,          // the seed already carries its own inbox tags
+    spells:JSON.parse(JSON.stringify(window.SEED || [])) };
+}
+
+/* Settings from the file, filled in from DEFAULTS and normalised. Shared by
+   boot() and a restore, so a restored book gets exactly the same treatment
+   as one that was already here. */
+function adoptSettings(){
+  doc.settings = Object.assign({}, DEFAULTS, doc.settings || {});
+  S = doc.settings;
+  if(!Array.isArray(S.include)) S.include = [];
+  if(!Array.isArray(S.require)) S.require = [];
+  if(!Array.isArray(S.exclude)) S.exclude = [];
+  if(!S.tagKindOverrides || typeof S.tagKindOverrides !== 'object') S.tagKindOverrides = {};
+  S.notifyTimes = cleanTimes(S.notifyTimes);
+  if(typeof S.notifyText !== 'string' || !S.notifyText) S.notifyText = notifyLimits().defaultText;
+}
+
+/* Every migration, in order, gated on the version the file claims. Each one
+   is still individually guarded, because a book written before SCHEMA moved
+   can carry any mixture of them. Returns whether anything changed — boot()
+   and restoreDoc() do the single write.
+
+   Convention for the next one: one-shot, guarded, commented with why, and
+   listed here. Bump SCHEMA in the same commit. */
+function runMigrations(){
+  let dirty = false;
+  const from = Number(doc.version) || 0;
+  if(from < 2){
+    if(migrateFlagTag()) dirty = true;
+    if(migrateFilterSchema()) dirty = true;
+    if(migrateDeskField()) dirty = true;
+    if(migrateInboxTag()) dirty = true;
+    if(migrateNotesField()) dirty = true;
+  }
+  if(doc.version !== SCHEMA){ doc.version = SCHEMA; dirty = true; }
+  return dirty;
 }
 
 /* What a tap outside the app wanted the page to land on. Shared by boot()
@@ -212,7 +282,7 @@ function migrateFilterSchema(){
     S.exclude = S.exclude.filter(t => !isSituationLike(t));
     changed = true;
   }
-  if(changed) persist();
+  return changed;
 }
 
 /* One-time migration: two legacy names for the same thing fold into
@@ -235,7 +305,7 @@ function migrateFlagTag(){
   const before = S.include.length + S.exclude.length;
   S.include = S.include.filter(t => !legacy.includes(t));
   S.exclude = S.exclude.filter(t => !legacy.includes(t));
-  if(touched || S.include.length + S.exclude.length !== before) persist();
+  return touched || S.include.length + S.exclude.length !== before;
 }
 
 /* One-time migration: older spells (and the seed) predate the desk field
@@ -244,7 +314,7 @@ function migrateFlagTag(){
 function migrateDeskField(){
   let touched = false;
   for(const s of doc.spells){ if(s.desked === undefined){ s.desked = null; touched = true; } }
-  if(touched) persist();
+  return touched;
 }
 
 /* One-time migration: the inbox is new. Every spell already in the book
@@ -252,14 +322,14 @@ function migrateDeskField(){
    it's already proven useful. Gated on a doc-level flag rather than tag
    presence, since a manually-removed inbox tag must not come back. */
 function migrateInboxTag(){
-  if(doc.inboxSeeded) return;
+  if(doc.inboxSeeded) return false;
   for(const s of doc.spells){
-    if(!(s.useful > 0) && !s.tags.includes('inbox')){
-      s.tags = [...s.tags, 'inbox'].sort();
+    if(!(s.useful > 0) && !s.tags.includes(INBOX)){
+      s.tags = [...s.tags, INBOX].sort();
     }
   }
   doc.inboxSeeded = true;
-  persist();   // always, even if nothing changed — the flag itself must be saved
+  return true;   // always, even if no spell changed — the flag itself must be saved
 }
 
 /* One-time migration: notes are new. Give every spell an explicit empty
@@ -271,10 +341,11 @@ function migrateInboxTag(){
 function migrateNotesField(){
   let touched = false;
   for(const s of doc.spells){ if(!Array.isArray(s.notes)){ s.notes = []; touched = true; } }
-  if(touched) persist();
+  return touched;
 }
 function persist(){
-  doc.exportedAt = new Date().toISOString();
+  doc.version = SCHEMA;
+  doc.exportedAt = now();
   Store.save(doc);
 }
 
@@ -395,14 +466,30 @@ function recharge(){
 /* =========================================================================
    Card rendering
    ========================================================================= */
+/* The tag strip, in the one place it is defined. It used to be written out
+   four times — here, in the useful handler, in the flag handler, and again
+   in triage() — which was the worst remaining uniqueness problem in the
+   file. `plain` gives the non-interactive spans triage wants. */
+function tagsHtml(s, opt={}){
+  const tags = tagsOf(s);
+  if(!tags.length) return '';
+  const el = opt.plain ? 'span' : 'button';
+  const act = opt.plain ? '' : ' data-act="tag"';
+  return `<div class="tags">${tags.map(t =>
+    `<${el} class="tag${isActiveFilter(t)?' brass':''}"${act} data-tag="${esc(t)}">${esc(t)}</${el}>`
+  ).join('')}</div>`;
+}
+
 function card(s, opt={}){
   const o = Object.assign({delay:0, from:'draw', open:false, decaying:false, badge:null, badgeClass:''}, opt);
+  // delay:undefined means "no entrance animation" — the spell sheet asks for
+  // that. Say so rather than emitting animation-delay:undefinedms.
+  const rise = o.delay === undefined ? '' : ' rise';
   return `
-  <article class="card${o.delay!==undefined?' rise':''}${o.decaying?' decaying':''}" style="animation-delay:${o.delay}ms" data-id="${s.id}">
+  <article class="card${rise}${o.decaying?' decaying':''}"${rise?` style="animation-delay:${o.delay}ms"`:''} data-id="${s.id}">
     ${o.badge ? `<div class="badge${o.badgeClass?' '+o.badgeClass:''}">${esc(o.badge)}</div>` : ''}
     <p class="spell ${sizeClass(s.text)}">${fmt(s.text)}</p>
-    ${tagsOf(s).length ? `<div class="tags">${tagsOf(s).map(t=>
-      `<button class="tag${isActiveFilter(t)?' brass':''}" data-act="tag" data-tag="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}
+    ${tagsHtml(s)}
     <div class="actions">
       <button class="act${s.useful?' on':''}" data-act="useful" aria-label="Mark useful">
         <svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.7-7.5-10a4.2 4.2 0 017.5-2.6A4.2 4.2 0 0119.5 10.5c0 5.3-7.5 10-7.5 10z"/></svg>
@@ -442,8 +529,10 @@ function sourceHtml(s){
   rows.push(['Drawn', s.drawn === 1 ? 'once' : s.drawn + ' times']);
   rows.push(['Useful', s.useful === 1 ? 'once' : s.useful + ' times']);
   if(s.notes && s.notes.length) rows.push(['Notes', s.notes.length === 1 ? '1 note' : s.notes.length + ' notes']);
-  return rows.map(([k,v])=>`<div><dt>${k}</dt><dd style="margin:0">${v}</dd></div>`).join('')
-    + `<div style="margin-top:11px;gap:6px"><button class="tag" data-act="edit">edit spell</button></div>`;
+  // dt/dd need a dl around them — they worked loose in a bare div everywhere,
+  // but "works everywhere" and "is a description list" are different claims.
+  return `<dl>${rows.map(([k,v])=>`<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`
+    + `<div class="source-edit"><button class="tag" data-act="edit">edit spell</button></div>`;
 }
 
 /* card interactions (delegated) */
@@ -460,36 +549,20 @@ document.addEventListener('click', e => {
 
   if(act === 'useful'){
     s.useful++; s.updatedAt = now();
-    const leftInbox = s.tags.includes('inbox');
-    if(leftInbox) s.tags = s.tags.filter(t=>t!=='inbox');
+    const leftInbox = s.tags.includes(INBOX);
+    if(leftInbox) s.tags = s.tags.filter(t => t !== INBOX);
     persist(); buzz(10);
-    btn.classList.add('on');
-    let n = btn.querySelector('.n');
-    if(!n){ n = document.createElement('span'); n.className = 'n'; btn.appendChild(n); }
-    n.textContent = s.useful;
-    if(leftInbox){
-      const box = cardEl.querySelector('.tags');
-      if(box) box.outerHTML = `<div class="tags">${tagsOf(s).map(t=>
-        `<button class="tag${isActiveFilter(t)?' brass':''}" data-act="tag" data-tag="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
-      const badgeEl = cardEl.querySelector('.badge.untested');
-      if(badgeEl) badgeEl.remove();
-      toast('Marked useful — left the inbox');
-    }
+    patchCard(s, cardEl);
+    if(leftInbox) toast('Marked useful — left the inbox');
     refreshQuiet();
   }
   if(act === 'flag'){
     const on = s.tags.includes(FLAGGED);
-    const leftInbox = !on && s.tags.includes('inbox');
-    s.tags = on ? s.tags.filter(t=>t!==FLAGGED) : [...s.tags.filter(t=>t!=='inbox'),FLAGGED].sort();
+    const leftInbox = !on && s.tags.includes(INBOX);
+    s.tags = on ? s.tags.filter(t => t !== FLAGGED)
+                : [...s.tags.filter(t => t !== INBOX), FLAGGED].sort();
     s.updatedAt = now(); persist(); buzz(10);
-    btn.classList.toggle('on', !on);
-    const box = cardEl.querySelector('.tags');
-    if(box) box.outerHTML = `<div class="tags">${tagsOf(s).map(t=>
-      `<button class="tag${isActiveFilter(t)?' brass':''}" data-act="tag" data-tag="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
-    if(leftInbox){
-      const badgeEl = cardEl.querySelector('.badge.untested');
-      if(badgeEl) badgeEl.remove();
-    }
+    patchCard(s, cardEl);
     toast(on ? 'Unflagged' : (leftInbox ? 'Flagged — left the inbox' : 'Flagged'));
     refreshQuiet();
   }
@@ -510,7 +583,7 @@ document.addEventListener('click', e => {
     btn.classList.toggle('on');
   }
   if(act === 'bury'){
-    s.state = 'graveyard'; s.updatedAt = now(); persist();
+    s.state = GRAVEYARD; s.updatedAt = now(); persist();
     cardEl.style.transition = 'opacity .3s, transform .3s';
     cardEl.style.opacity = 0; cardEl.style.transform = 'scale(.97)';
     setTimeout(()=>{ cardEl.remove(); refreshQuiet(); }, 300);
@@ -535,14 +608,14 @@ function addNoteToSpell(s, note){
   s.notes.push(Object.assign({ id:nid(), createdAt:now() }, note));
   s.updatedAt = now();
   persist();
-  redrawCard(s);
+  patchCard(s);
   refreshQuiet();
 }
 
 /* The quick action: a short sheet, nothing but a textarea, so capture stays
    as fast as marking a spell useful. */
 function openAddNote(s){
-  sheet('Add a note', `
+  sheet('add-note', 'Add a note', `
     <p class="help" style="margin-top:0">What happened when you used this — or an answer to what it asked.</p>
     <div class="field" style="margin-top:9px"><textarea id="nText" placeholder="Write a note…"></textarea></div>
     <button class="btn" id="nSave">Save note</button>
@@ -604,7 +677,7 @@ function noteHtml(n){
    with the composer for the next entry waiting at the bottom. */
 function openNotes(s, keep){
   const notes = (s.notes || []).slice().sort((a,b) => (a.createdAt||'').localeCompare(b.createdAt||''));
-  sheet('Notes', `
+  sheet('notes', 'Notes', `
     <div class="notes" id="notesThread">
       ${notes.length ? notes.map(noteHtml).join('')
         : `<p class="note-empty">No notes yet — add the first one below.</p>`}
@@ -615,7 +688,7 @@ function openNotes(s, keep){
     </div>
     <button class="btn" id="nSave2">Save note</button>
     ${micBtn('nMic2')}
-  `, null, keep);
+  `, {keep});
   const body = document.querySelector('.sheet .body');
   if(body) body.scrollTop = body.scrollHeight;
   $('#nSave2').onclick = () => {
@@ -631,7 +704,7 @@ function openNotes(s, keep){
     // The audio is the note. Nothing else refers to it, so it goes too.
     if(gone && gone.type === 'voice' && gone.file) dropMedia(gone.file);
     s.notes = (s.notes || []).filter(n => n.id !== b.dataset.nid);
-    s.updatedAt = now(); persist(); redrawCard(s); refreshQuiet();
+    s.updatedAt = now(); persist(); patchCard(s); refreshQuiet();
     openNotes(s, true);
   });
 }
@@ -674,15 +747,15 @@ function openFilters(){
   const tags = allTags();
   const situ = tags.filter(([t]) => isSituationLike(t));
   const special = tags.filter(([t]) => !isSituationLike(t));
-  sheet('Filters', `
+  sheet('filters', 'Filters', `
     <p class="help" style="margin:2px 0 4px">Situations: tap any that apply. Type &amp; marks: set
     Require or Never. Narrows the draw and the library both, and stays put between sessions.</p>
     <span class="eyebrow" style="display:block;margin-top:8px">Situations</span>
     <div class="taggrid" id="fSitu">
       ${situ.map(([t,n])=>{
         const on = S.include.includes(t);
-        return `<button class="tagbtn" data-t="${esc(t)}" style="${on?'border-color:var(--brass);':''}">
-          <span class="nm" style="${on?'color:var(--brass)':''}">${esc(t)}</span>
+        return `<button class="tagbtn${on?' picked':''}" data-t="${esc(t)}">
+          <span class="nm">${esc(t)}</span>
           <span class="ct">${n}</span></button>`;
       }).join('')}
     </div>
@@ -691,7 +764,7 @@ function openFilters(){
       ${special.map(([t,n])=>{
         const on = S.require.includes(t), off = S.exclude.includes(t);
         return `<div class="factitem" data-t="${esc(t)}" data-n="${n}">
-          <span class="nm" style="${on?'color:var(--brass)':off?'text-decoration:line-through;opacity:.6':''}">${esc(t)}<span class="ct">${n}</span></span>
+          <span class="nm${on?' required':off?' never':''}">${esc(t)}<span class="ct">${n}</span></span>
           <span class="seg">
             <button data-mode="require" class="${on?'on':''}">Require</button>
             <button data-mode="never" class="${off?'on':''}">Never</button>
@@ -702,7 +775,7 @@ function openFilters(){
     <div style="font-size:13px;color:var(--dim);text-align:center;padding:4px 0" id="fCount"></div>
     <button class="btn ghost" id="fClear">Clear all filters</button>
     <button class="btn" id="fDone">Done</button>
-  `, () => {});
+  `, {onClose: () => {}});
 
   /* Once any filter is active, each Type & marks tag shows what the pool
      would shrink to if it were also Required — the original count crossed
@@ -713,7 +786,7 @@ function openFilters(){
       const t = row.dataset.t, n = row.dataset.n;
       const ct = row.querySelector('.ct');
       if(filtersActive){
-        ct.innerHTML = `<s style="opacity:.55">${n}</s> ${requireCountWith(t)}`;
+        ct.innerHTML = `<s>${n}</s> ${requireCountWith(t)}`;
       } else {
         ct.textContent = n;
       }
@@ -729,8 +802,7 @@ function openFilters(){
     const on = S.include.includes(t);
     S.include = on ? S.include.filter(x=>x!==t) : [...S.include, t];
     persist();
-    b.style.borderColor = !on ? 'var(--brass)' : '';
-    b.querySelector('.nm').style.color = !on ? 'var(--brass)' : '';
+    b.classList.toggle('picked', !on);
     upd();
   });
   $('#fSpecial').querySelectorAll('.factitem').forEach(row => {
@@ -746,9 +818,8 @@ function openFilters(){
       row.querySelector('[data-mode="require"]').classList.toggle('on', nowOn);
       row.querySelector('[data-mode="never"]').classList.toggle('on', nowOff);
       const nm = row.querySelector('.nm');
-      nm.style.color = nowOn ? 'var(--brass)' : '';
-      nm.style.textDecoration = nowOff ? 'line-through' : 'none';
-      nm.style.opacity = nowOff ? '.6' : '';
+      nm.classList.toggle('required', nowOn);
+      nm.classList.toggle('never', nowOff);
       upd();
     });
   });
@@ -819,9 +890,9 @@ function renderLibrary(){
 
 function openSpell(s){
   if(!s) return;
-  const grave = s.state === 'graveyard';
+  const grave = s.state === GRAVEYARD;
   const noteCount = (s.notes || []).length;
-  sheet('Spell', `<div id="sheetCard">${card(s,{delay:undefined})}</div>
+  sheet('spell', 'Spell', `<div id="sheetCard">${card(s,{delay:undefined})}</div>
     <button class="btn ghost" id="spNotes">${noteCount ? `Notes (${noteCount})` : 'Notes'}</button>
     <button class="btn ghost" id="spEdit">Edit</button>
     <button class="btn ${grave?'':'danger'}" id="spGrave">${grave?'Restore to the book':'Move to graveyard'}</button>`);
@@ -829,7 +900,7 @@ function openSpell(s){
   $('#spNotes').onclick = () => { closeSheet(); openNotes(s); };
   $('#spEdit').onclick = () => { closeSheet(); editSpell(s); };
   $('#spGrave').onclick = () => {
-    s.state = grave ? 'active' : 'graveyard'; s.updatedAt = now(); persist();
+    s.state = grave ? ACTIVE : GRAVEYARD; s.updatedAt = now(); persist();
     closeSheet(); renderAll(); toast(grave ? 'Back in the book' : 'Sent to the graveyard');
   };
 }
@@ -877,7 +948,7 @@ function manageTag(tag){
   const held = doc.spells.filter(s => s.tags.includes(tag));
   const taken = new Set(doc.spells.flatMap(s => s.tags));
   const locked = PROTECTED.includes(tag);
-  sheet('Tag', `
+  sheet('tag', 'Tag', `
     <p class="spell lg" style="margin:4px 0 6px">${esc(tag)}</p>
     <p class="help" style="margin:0">On ${held.length} ${held.length===1?'spell':'spells'}.</p>
     <div class="field"><label>Kind</label>
@@ -969,6 +1040,7 @@ function manageTag(tag){
    ========================================================================= */
 function renderVault(){
   const bk = backupInfo();
+  const snaps = Store.snapshots();
   const a = active().length, g = buried().length;
   const untagged = active().filter(s => computed(s).includes('untagged')).length;
   const onDesk = deskList().length, decaying = decayList().length;
@@ -1029,7 +1101,14 @@ function renderVault(){
         <span class="lab">Export the book<span class="s">A JSON file — spells and notes. Recordings stay on the phone</span></span></button>
       <button class="item" id="vImport">
         <svg viewBox="0 0 24 24"><path d="M12 15V3M8 7l4-4 4 4"/><path d="M4 17v3h16v-3"/></svg>
-        <span class="lab">Import spells<span class="s">Merges by id, never overwrites counts</span></span></button>
+        <span class="lab">Merge in spells<span class="s">Another book's spells, folded into this one. Nothing here is overwritten</span></span></button>
+      <button class="item" id="vRestore">
+        <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.7L3 8"/><path d="M3 3v5h5"/></svg>
+        <span class="lab">Restore from a file<span class="s">Replaces this book — spells, counts, graveyard and settings</span></span></button>
+      ${snaps.length ? `<button class="item" id="vSnaps">
+        <svg viewBox="0 0 24 24"><path d="M12 8v5l3 2"/><circle cx="12" cy="12" r="9"/></svg>
+        <span class="lab">Earlier versions<span class="s">Daily copies the app keeps for itself</span></span>
+        <span class="val">${snaps.length}</span></button>` : ''}
     </div>
 
     ${canRecord() ? `<div class="group"><span class="eyebrow">Voice notes</span>
@@ -1058,7 +1137,9 @@ function renderVault(){
   $('#vNotify').onclick = () => openReminders();
   $('#vExport').onclick = exportBook;
   $('#vFolder').onclick = () => openBackupFolder(bk);
-  $('#vImport').onclick = () => $('#fileIn').click();
+  $('#vImport').onclick = () => { fileMode = 'merge'; $('#fileIn').click(); };
+  $('#vRestore').onclick = () => { fileMode = 'restore'; $('#fileIn').click(); };
+  if($('#vSnaps')) $('#vSnaps').onclick = openSnapshots;
   $('#vaultBody').querySelectorAll('[data-bt]').forEach(b => b.onclick = () => {
     S.btMic = b.dataset.bt === '1'; persist(); renderVault();
   });
@@ -1113,8 +1194,8 @@ function renderDesk(){
 function editSpell(s, after){
   const isNew = !s;
   const known = allTags().map(t=>t[0]).filter(t => !STRUCTURAL.includes(t));
-  const cur = new Set(s ? s.tags : ['inbox']);
-  sheet(isNew ? 'Write a spell' : 'Edit spell', `
+  const cur = new Set(s ? s.tags : [INBOX]);
+  sheet('edit-spell', isNew ? 'Write a spell' : 'Edit spell', `
     <div class="field"><label>The spell</label>
       <div class="fmtbar">
         <button data-wrap="**" style="font-weight:700">B</button>
@@ -1124,20 +1205,18 @@ function editSpell(s, after){
       <textarea id="eText" placeholder="What do you want to remember?">${s?esc(s.text):''}</textarea></div>
     <div class="field"><label>Tags</label>
       <div class="taggrid" id="eTags" style="padding:0 0 10px">
-        ${known.map(t=>`<button class="tagbtn" data-t="${esc(t)}"
-          style="${cur.has(t)?'border-color:var(--brass)':''}">
-          <span class="nm" style="${cur.has(t)?'color:var(--brass)':''}">${esc(t)}</span></button>`).join('')}
+        ${known.map(t=>`<button class="tagbtn${cur.has(t)?' picked':''}" data-t="${esc(t)}">
+          <span class="nm">${esc(t)}</span></button>`).join('')}
       </div>
       <input id="eNew" placeholder="New tag, then Enter" autocomplete="off">
     </div>
     <button class="btn" id="eSave">${isNew?'Add to the book':'Save'}</button>
     ${isNew?'':'<button class="btn ghost" id="eCancel">Cancel</button>'}
-  `, null, !!after);
+  `, {keep: !!after});
   const wire = b => b.onclick = () => {
     const t = b.dataset.t;
     if(cur.has(t)) cur.delete(t); else cur.add(t);
-    b.style.borderColor = cur.has(t)?'var(--brass)':'';
-    b.querySelector('.nm').style.color = cur.has(t)?'var(--brass)':'';
+    b.classList.toggle('picked', cur.has(t));
   };
   $('#eTags').querySelectorAll('[data-t]').forEach(wire);
 
@@ -1165,15 +1244,18 @@ function editSpell(s, after){
     const t = e.target.value.trim().toLowerCase().replace(/\s+/g,'-');
     if(!t) return;
     cur.add(t); e.target.value = '';
-    if(!$(`#eTags [data-t="${t}"]`)){
+    // CSS.escape, because the tag is raw input: normalising leaves a quote
+    // intact, and a quote here used to throw SyntaxError out of
+    // querySelector and take the whole keydown handler with it.
+    if(!$(`#eTags [data-t="${CSS.escape(t)}"]`)){
       // Brand-new tag: default it into Situations rather than Type & mark
       // (isSituationLike's fallback is SITUATIONS.includes(t), false for
       // anything just typed here) so a freshly-created category shows up
       // where most new tags belong, with no extra tap in the tag manager.
       if(!SITUATIONS.includes(t)) S.tagKindOverrides[t] = 'situation';
       const b = document.createElement('button');
-      b.className='tagbtn'; b.dataset.t=t; b.style.borderColor='var(--brass)';
-      b.innerHTML = `<span class="nm" style="color:var(--brass)">${esc(t)}</span>`;
+      b.className='tagbtn picked'; b.dataset.t=t;
+      b.innerHTML = `<span class="nm">${esc(t)}</span>`;
       $('#eTags').appendChild(b); wire(b);
     }
   };
@@ -1182,7 +1264,7 @@ function editSpell(s, after){
     if(!text){ toast('A spell needs words'); return; }
     if(isNew){
       doc.spells.unshift({ id:uid(), text, tags:[...cur].sort(), useful:0, drawn:0, lastDrawn:null,
-        state:'active', desked:null, notes:[], createdAt:now(), updatedAt:now(),
+        state:ACTIVE, desked:null, notes:[], createdAt:now(), updatedAt:now(),
         source:{origin:'manual', note:null, file:null, line:null, url:null, capturedAt:now().slice(0,10)} });
       toast('Written into the book');
     } else {
@@ -1191,7 +1273,7 @@ function editSpell(s, after){
     }
     persist();
     if(after){ after(); return; }
-    closeSheet(); redrawCard(s); renderAll();
+    closeSheet(); patchCard(s); renderAll();
   };
   const c = $('#eCancel'); if(c) c.onclick = () => after ? after() : closeSheet();
 }
@@ -1204,11 +1286,11 @@ function triage(){
   const step = () => {
     if(i >= queue.length){ closeSheet(); renderAll(); toast('Book walked'); return; }
     const s = queue[i];
-    sheet('Triage', `
+    sheet('triage', 'Triage', `
       <div class="progress"><i style="width:${(i/queue.length*100).toFixed(1)}%"></i></div>
       <p class="spell ${sizeClass(s.text)}" style="margin:20px 0 14px">${fmt(s.text)}</p>
-      <div class="tags">${tagsOf(s).map(t=>`<span class="tag${isActiveFilter(t)?' brass':''}">${esc(t)}</span>`).join('')}</div>
-      <div style="font-size:12px;color:var(--dim);line-height:1.6">
+      ${tagsHtml(s, {plain:true})}
+      <div class="factline">
         ${esc(s.source?.capturedAt || s.source?.note || 'no date')}${s.drawn?' · drawn '+s.drawn+'×':''}${s.useful?' · useful '+s.useful+'×':''}
         ${s.source?.url?`<br><a href="${esc(s.source.url)}" target="_blank" rel="noreferrer" style="color:var(--brass);word-break:break-all">${esc(s.source.url)}</a>`:''}
       </div>
@@ -1218,17 +1300,28 @@ function triage(){
         <button id="tBury">Bury</button>
       </div>
       <div style="text-align:center;font-size:12px;color:var(--dim);padding-top:12px">
-        ${i+1} of ${queue.length}</div>`, null, true);
+        ${i+1} of ${queue.length}</div>`, {keep:true});
     $('#tKeep').onclick = () => { i++; step(); };
-    $('#tBury').onclick = () => { s.state='graveyard'; s.updatedAt=now(); persist(); i++; step(); };
+    $('#tBury').onclick = () => { s.state=GRAVEYARD; s.updatedAt=now(); persist(); i++; step(); };
     $('#tEdit').onclick = () => { editSpell(s, () => step()); };
   };
   step();
 }
 
-/* ---------- import / export ---------- */
+/* ---------- import / export ----------
+   Two kinds of import, and the difference is the whole of this section.
+
+   RESTORE replaces this book with the file — spells, counters, graveyard
+   state and settings, all of it. It's how you come back from a book that
+   was lost or wouldn't open, and it's the only path that can bring a count
+   back. The current book is kept beside the snapshots first, so a restore
+   started by mistake is itself reversible.
+
+   MERGE folds someone else's spells into yours. It never resurrects a spell
+   you buried and never lowers a count: counters take whichever side has seen
+   more. Settings are ignored, because they belong to this phone.           */
 function exportBook(){
-  const data = JSON.stringify({version:1, exportedAt:now(), settings:S, spells:doc.spells}, null, 2);
+  const data = JSON.stringify({version:SCHEMA, exportedAt:now(), settings:S, spells:doc.spells}, null, 2);
   const name = 'spellbook-' + now().slice(0,10) + '.json';
   if(Bridge && Bridge.export){
     try{ const where = Bridge.export(name, data); toast('Saved to ' + (where || 'Downloads')); return; }
@@ -1240,54 +1333,225 @@ function exportBook(){
   toast('Exported ' + doc.spells.length + ' spells');
 }
 
-function importBook(e){
-  const file = e.target.files[0]; if(!file) return;
-  const r = new FileReader();
-  r.onload = () => {
-    let incoming;
-    try{
-      const parsed = JSON.parse(r.result);
-      incoming = Array.isArray(parsed) ? parsed : parsed.spells;
-      if(!Array.isArray(incoming)) throw 0;
-    }catch(err){ toast("That file isn't a spellbook"); return; }
+/* A file, whichever kind of import asked for it. Throws if it isn't a book. */
+function parseBook(text){
+  const parsed = JSON.parse(text);
+  const spells = Array.isArray(parsed) ? parsed : parsed.spells;
+  if(!Array.isArray(spells)) throw new Error('no spells');
+  return Array.isArray(parsed) ? { spells } : parsed;
+}
 
-    const byId = new Map(doc.spells.map(s=>[s.id, s]));
-    let added = 0, merged = 0;
-    for(const raw of incoming){
-      const text = (raw.text || '').trim();
-      if(!text) continue;
-      const id = raw.id || uid();
-      const ex = byId.get(id);
-      if(ex){
-        ex.text = text;
-        // Tags are authored data: an updated book replaces them. Counts,
-        // graveyard state and draw history are never touched by an import.
-        ex.tags = (raw.tags || []).filter(t => !STRUCTURAL.includes(t)).slice().sort();
-        if(raw.source) ex.source = Object.assign({}, raw.source, {origin: ex.source?.origin || raw.source.origin});
-        ex.updatedAt = now();
-        merged++;                       // counts and state deliberately untouched
-      } else {
-        // A spell new to this book enters the inbox, same as one written
-        // by hand — unless the incoming file already marks it useful.
-        const rawUseful = raw.useful||0;
-        const tags = (raw.tags||[]).filter(t => !STRUCTURAL.includes(t));
-        if(rawUseful === 0 && !tags.includes('inbox')) tags.push('inbox');
-        const s = {
-          id, text, tags:tags.slice().sort(),
-          useful:rawUseful, drawn:raw.drawn||0, lastDrawn:raw.lastDrawn||null,
-          state:raw.state==='graveyard'?'graveyard':'active', desked:raw.desked||null,
-          notes:Array.isArray(raw.notes)?raw.notes:[],
-          createdAt:raw.createdAt||now(), updatedAt:now(),
-          source:raw.source || {origin:'import', note:null, file:null, line:null, url:null, capturedAt:null}
-        };
-        doc.spells.push(s); byId.set(id, s); added++;
-      }
-    }
-    persist(); refreshMedia(); renderAll();
-    toast(`${added} new, ${merged} updated`);
+/* One spell, in this book's shape, keeping everything the file knows about
+   it. Used by restore (where history is the point) and by merge for a spell
+   that's new here. */
+function adoptSpell(raw){
+  const tags = (raw.tags || []).filter(t => !STRUCTURAL.includes(t));
+  return {
+    id: raw.id || uid(),
+    text: (raw.text || '').trim(),
+    tags: tags.slice().sort(),
+    useful: raw.useful || 0, drawn: raw.drawn || 0, lastDrawn: raw.lastDrawn || null,
+    state: raw.state === GRAVEYARD ? GRAVEYARD : ACTIVE,
+    desked: raw.desked || null,
+    notes: Array.isArray(raw.notes) ? raw.notes : [],
+    createdAt: raw.createdAt || now(), updatedAt: raw.updatedAt || now(),
+    source: raw.source || {origin:'import', note:null, file:null, line:null, url:null, capturedAt:null}
   };
-  r.readAsText(file);
+}
+
+/* Replace this book with that one. The only path that restores counts.
+   Callable with no book loaded at all — that's the recovery screen. */
+function restoreDoc(text, label){
+  let book;
+  try{ book = parseBook(text); }
+  catch(e){ toast("That file isn't a spellbook"); return false; }
+  const spells = book.spells.map(adoptSpell).filter(s => s.text);
+  if(!spells.length){ toast('That file holds no spells'); return false; }
+
+  // Keep what's here now before it goes. Silently does nothing when the
+  // current book is the one that wouldn't open — there's nothing to keep,
+  // and that file must stay exactly where it is.
+  Store.keepPreRestore(doc);
+
+  doc = {
+    version: Number(book.version) || 1,     // vintage of the *file*, so the
+    exportedAt: now(),                      // migrations know what to run
+    inboxSeeded: book.inboxSeeded === true,
+    settings: (book.settings && typeof book.settings === 'object') ? book.settings : {},
+    spells
+  };
+  adoptSettings();     // settings come back too — that's F1.4
+  runMigrations();     // a file of unknown vintage, through the usual path
+  persist();
+
+  hideRecovery();
+  refreshMedia(); sweepMedia(); renderAll(); go('draw');
+  toast(`Restored ${spells.length} spells${label ? ' from ' + label : ''}`);
+  return true;
+}
+
+function confirmRestore(text, label){
+  let count = '?';
+  try{ count = parseBook(text).spells.length; }catch(e){ toast("That file isn't a spellbook"); return; }
+  sheet('restore', 'Restore', `
+    <p class="help" style="margin-top:0">This replaces the book you have now with
+      <b>${esc(label)}</b> — ${count} spells, with their counts, their graveyard and
+      the settings saved alongside them.</p>
+    <p class="help">${Bridge
+      ? 'Your current book is kept as an earlier version first, so this is undoable.'
+      : 'Preview mode: nothing here is written to a file either way.'}</p>
+    <button class="btn" id="rsGo">Replace the book</button>
+    <button class="btn ghost" id="rsNo">Cancel</button>`);
+  $('#rsGo').onclick = () => { closeSheet(); restoreDoc(text, label); };
+  $('#rsNo').onclick = closeSheet;
+}
+
+/* Vault → Keeping → Earlier versions. The snapshots the shell has been
+   writing since the first save, which until now nothing could reach. */
+function openSnapshots(){
+  const list = Store.snapshots();
+  const rows = list.map(s => `
+    <button class="item" data-snap="${esc(s.name)}">
+      <svg viewBox="0 0 24 24"><path d="M12 8v5l3 2"/><circle cx="12" cy="12" r="9"/></svg>
+      <span class="lab">${esc(snapLabel(s.name))}<span class="s">${
+        s.spells >= 0 ? s.spells + ' spells' : 'spell count unknown'} · ${Math.round((s.bytes||0)/1024)} KB</span></span>
+      <span class="val">Restore</span></button>`).join('');
+  sheet('snapshots', 'Earlier versions', `
+    <p class="help" style="margin-top:0">The book is copied here once a day, and again
+      just before anything replaces it. Seven daily copies are kept.</p>
+    ${rows || '<p class="help">Nothing here yet — the first copy is written on the next save.</p>'}`);
+  document.querySelectorAll('[data-snap]').forEach(b => b.onclick = () => {
+    const name = b.dataset.snap;
+    const text = Store.readSnapshot(name);
+    if(!text){ toast("That copy couldn't be read"); return; }
+    closeSheet();
+    confirmRestore(text, snapLabel(name));
+  });
+}
+
+/* 'spellbook-2026-08-27.json' → '27 August 2026'; a pre-restore copy says so. */
+function snapLabel(name){
+  const daily = /^spellbook-(\d{4})-(\d{2})-(\d{2})\.json$/.exec(name);
+  if(daily) return new Date(`${daily[1]}-${daily[2]}-${daily[3]}T12:00:00`)
+    .toLocaleDateString(undefined, {day:'numeric', month:'long', year:'numeric'});
+  const pre = /^pre-restore-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(name);
+  if(pre) return `Before a restore · ${pre[3]}.${pre[2]}.${pre[1]} ${pre[4]}:${pre[5]}`;
+  return name;
+}
+
+/* Shown instead of the app when the book is on disk and won't open. Every
+   other screen leads to a write, and a write would land on the evidence. */
+function showRecovery(found){
+  const list = Store.snapshots();
+  const why = found.state === 'corrupt'
+    ? "The file is there, but it isn't valid JSON any more — most likely a write that didn't finish."
+    : "The file is there and couldn't be read at all — a permissions or disk problem.";
+  const el = $('#recovery');
+  el.innerHTML = `
+    <h1>The book didn't open</h1>
+    <p>${why} <b>Nothing has been written over it.</b> It's still on the phone exactly
+      as it was, and it may be partly salvageable.</p>
+    ${found.error ? `<p class="why">${esc(String(found.error))}</p>` : ''}
+    ${list.length ? `<div class="group"><span class="eyebrow">Earlier versions</span>
+      ${list.map(s => `<button class="item" data-rsnap="${esc(s.name)}">
+        <svg viewBox="0 0 24 24"><path d="M12 8v5l3 2"/><circle cx="12" cy="12" r="9"/></svg>
+        <span class="lab">${esc(snapLabel(s.name))}<span class="s">${
+          s.spells >= 0 ? s.spells + ' spells' : 'spell count unknown'}</span></span>
+        <span class="val">Restore</span></button>`).join('')}</div>`
+      : `<div class="banner">No earlier version is on the phone. If you've been copying
+         the book to a backup folder, that copy is the one to restore from.</div>`}
+    <div class="group"><span class="eyebrow">Or</span>
+      <button class="btn ghost" id="recFile">Restore from a file</button>
+      <button class="btn danger" id="recFresh">Start a new book</button>
+    </div>
+    <input type="file" id="recIn" accept=".json,application/json" class="hide">`;
+  el.classList.remove('hide');
+  $('#app').classList.add('hide');
+
+  el.querySelectorAll('[data-rsnap]').forEach(b => b.onclick = () => {
+    const text = Store.readSnapshot(b.dataset.rsnap);
+    if(!text){ toast("That copy couldn't be read"); return; }
+    confirmRestore(text, snapLabel(b.dataset.rsnap));
+  });
+  $('#recFile').onclick = () => $('#recIn').click();
+  $('#recIn').onchange = e => readChosen(e, (text, name) => confirmRestore(text, name));
+  // Two taps, because this is the one action that writes over the old file.
+  let armed = false;
+  $('#recFresh').onclick = e => {
+    if(!armed){ armed = true; e.target.textContent = 'Tap again — this overwrites the old file'; return; }
+    doc = freshBook();
+    adoptSettings();
+    persist();
+    hideRecovery();
+    refreshMedia(); renderAll(); go('draw');
+    toast('Started a new book');
+  };
+}
+
+function hideRecovery(){
+  const el = $('#recovery');
+  if(el){ el.classList.add('hide'); el.innerHTML = ''; }
+  $('#app').classList.remove('hide');
+}
+
+/* Shared by both file inputs: read the chosen file as text, then reset the
+   input so choosing the same file twice still fires. */
+function readChosen(e, then){
+  const file = e.target.files[0];
   e.target.value = '';
+  if(!file) return;
+  const r = new FileReader();
+  r.onload = () => then(r.result, file.name);
+  r.readAsText(file);
+}
+
+/* One file input serves both kinds; this says which one asked for it. */
+let fileMode = 'merge';
+function importBook(e){
+  readChosen(e, (text, name) =>
+    fileMode === 'restore' ? confirmRestore(text, name) : mergeSpells(text));
+}
+
+/* Fold another book's spells into this one. Yours is the book that wins:
+   nothing here can bury a spell, resurrect one you buried, or lower a count. */
+function mergeSpells(text){
+  let incoming;
+  try{ incoming = parseBook(text).spells; }
+  catch(err){ toast("That file isn't a spellbook"); return; }
+
+  const byId = new Map(doc.spells.map(s=>[s.id, s]));
+  let added = 0, merged = 0;
+  for(const raw of incoming){
+    const text = (raw.text || '').trim();
+    if(!text) continue;
+    const id = raw.id || uid();
+    const ex = byId.get(id);
+    if(ex){
+      ex.text = text;
+      // Tags are authored data: an updated book replaces them.
+      ex.tags = (raw.tags || []).filter(t => !STRUCTURAL.includes(t)).slice().sort();
+      if(raw.source) ex.source = Object.assign({}, raw.source, {origin: ex.source?.origin || raw.source.origin});
+      // Counters take whichever side has seen more. A merge can add to your
+      // history — the same spell drawn on another phone — but never subtract
+      // from it, which is what skipping them entirely used to cost a restore.
+      ex.useful = Math.max(ex.useful || 0, raw.useful || 0);
+      ex.drawn = Math.max(ex.drawn || 0, raw.drawn || 0);
+      ex.lastDrawn = [ex.lastDrawn, raw.lastDrawn].filter(Boolean).sort().pop() || null;
+      // state is deliberately untouched: burying is a judgement about this
+      // book, and no file gets to overturn it. Restore is the way back.
+      ex.updatedAt = now();
+      merged++;
+    } else {
+      // A spell new to this book enters the inbox, same as one written
+      // by hand — unless the incoming file already marks it useful.
+      const s = adoptSpell(raw);
+      if(s.useful === 0 && !s.tags.includes(INBOX)) s.tags = [...s.tags, INBOX].sort();
+      s.updatedAt = now();
+      doc.spells.push(s); byId.set(id, s); added++;
+    }
+  }
+  persist(); refreshMedia(); renderAll();
+  toast(`${added} new, ${merged} updated`);
 }
 
 /* =========================================================================
@@ -1315,13 +1579,49 @@ function renderAll(){
   if(!$('#vault').classList.contains('hide')) renderVault();
   if(!$('#desk').classList.contains('hide')) renderDesk();
 }
-/* A spell shown on the draw screen must reflect an edit immediately. */
-function redrawCard(s){
-  if(!s) return;
-  const el = document.querySelector(`#results .card[data-id="${s.id}"]`);
-  if(!el) return;
-  el.outerHTML = card(s, {delay:0, badge:inboxBadge(s), badgeClass:'untested'});
-  document.querySelector(`#results .card[data-id="${s.id}"]`).classList.remove('rise');
+/* One way to redraw a card in place, used everywhere.
+   There used to be two: this one replaced the whole element, while the
+   useful and flag handlers hand-patched individual nodes to keep the
+   entrance animation from replaying. Both were reasonable; having both was
+   the problem, and they had already drifted — one rebuilt the tag strip and
+   dropped the inbox badge, the other did the same in a different order and
+   left the useful count stale.
+
+   What's local to the element rather than to the spell is carried across:
+   the entrance animation doesn't replay, an open source panel stays open,
+   and the card keeps the kind of badge it was rendered with (the desk shows
+   an age, the draw shows the inbox mark). Pass `el` when you have it — a
+   spell can be on screen in two places at once. */
+function patchCard(s, el){
+  if(!s) return null;
+  const target = el || document.querySelector(`#results .card[data-id="${s.id}"]`);
+  if(!target) return null;
+
+  const src = target.querySelector('.source');
+  const openSource = !!src && !src.classList.contains('hide');
+  const badgeEl = target.querySelector('.badge');
+  const o = {
+    delay: 0,
+    decaying: target.classList.contains('decaying'),
+    badge: badgeEl ? badgeEl.textContent : null,
+    badgeClass: badgeEl ? [...badgeEl.classList].filter(c => c !== 'badge').join(' ') : ''
+  };
+  // The inbox badge is the one that can stop being true under your hands.
+  if(o.badgeClass.includes('untested') && !inboxBadge(s)){ o.badge = null; o.badgeClass = ''; }
+
+  const holder = document.createElement('div');
+  holder.innerHTML = card(s, o);
+  const fresh = holder.firstElementChild;
+  fresh.classList.remove('rise');
+  if(openSource){
+    const box = fresh.querySelector('.source');
+    box.innerHTML = sourceHtml(s);
+    box.classList.remove('hide');
+    const b = fresh.querySelector('[data-act="source"]');
+    if(b) b.classList.add('on');
+  }
+  target.replaceWith(fresh);
+  return fresh;
 }
 
 function refreshQuiet(){
@@ -1350,6 +1650,9 @@ $('#search').oninput = renderLibrary;
 document.addEventListener('keydown', e => { if(e.key === 'Escape') closeSheet(); });
 
 boot();
+// The test suite waits on this rather than on `doc`, because a book that
+// wouldn't open leaves `doc` undefined — which is the case worth testing.
+window.__booted = true;
 </script>
 </body>
 </html>

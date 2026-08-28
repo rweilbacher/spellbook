@@ -69,7 +69,7 @@ function paintRecorder(){
   const label = rec.state === 'recording' ? clock(rec.ms/1000)
     : rec.state === 'saving' ? 'Saving…'
     : 'Getting ready…';
-  sheet('Voice note', `
+  sheet('voice-note', 'Voice note', `
     <div class="vrec">
       <div class="vdot${rec.state === 'recording' ? ' live' : ''}"></div>
       <div class="vtime" id="vTime">${esc(label)}</div>
@@ -78,7 +78,7 @@ function paintRecorder(){
     </div>
     <button class="btn" id="vStop"${rec.state === 'recording' ? '' : ' disabled style="opacity:.45"'}>Stop and save</button>
     <button class="btn ghost" id="vDiscard">Discard</button>
-  `, null, true);
+  `, {keep:true});
   const stop = $('#vStop'), drop = $('#vDiscard');
   if(stop) stop.onclick = () => {
     if(!rec){ closeSheet(); return; }
@@ -124,8 +124,7 @@ window.onNative = function(raw){
       toast('Reminders are set, but Android is holding them back');
     }
     if(!$('#vault').classList.contains('hide')) renderVault();
-    const open = document.querySelector('.sheet .top .eyebrow');
-    if(open && open.textContent === 'Reminders') openReminders(true);
+    if(openSheetName() === 'reminders') openReminders(true);
     return;
   }
   if(e.kind !== 'voice' || !rec) return;

@@ -127,8 +127,10 @@ button.tag:active{border-color:var(--brass-dim)}
 
 .source{border-top:1px solid var(--line);margin-top:9px;padding-top:11px;
   font-size:12.5px;color:var(--muted);line-height:1.65}
-.source div{display:flex;gap:9px}
+.source dl{margin:0}
+.source dl div{display:flex;gap:9px}
 .source dt{color:var(--dim);min-width:64px;flex-shrink:0}
+.source dd{margin:0}
 .source a{color:var(--brass);word-break:break-all}
 
 /* ---------- notes thread ---------- */
@@ -198,6 +200,11 @@ button.tag:active{border-color:var(--brass-dim)}
 .tagbtn .nm{font-size:14px}
 .tagbtn .ct{font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums}
 .tagbtn.struct .nm{color:var(--brass)}
+/* Picked: this tag is part of what you've filtered for, or a tag this spell
+   carries. Was set as inline style from three places, which meant the state
+   was only visible by reading template literals. */
+.tagbtn.picked{border-color:var(--brass)}
+.tagbtn.picked .nm{color:var(--brass)}
 
 .factlist{padding:6px 0 20px}
 .factitem{display:flex;align-items:center;justify-content:space-between;gap:10px;
@@ -205,6 +212,11 @@ button.tag:active{border-color:var(--brass-dim)}
   border-radius:11px;margin-bottom:8px}
 .factitem .nm{font-size:14px}
 .factitem .ct{font-size:11.5px;color:var(--dim);margin-left:8px;font-variant-numeric:tabular-nums}
+.factitem .nm.required{color:var(--brass)}
+.factitem .nm.never{text-decoration:line-through;opacity:.6}
+.factitem .ct s{opacity:.55}
+/* The line of small facts under a spell in triage. */
+.factline{font-size:12px;color:var(--dim);line-height:1.6}
 
 .empty{text-align:center;color:var(--dim);padding:52px 20px;font-size:14px;line-height:1.7}
 .empty b{display:block;font-family:var(--serif);font-size:19px;color:var(--muted);
@@ -271,14 +283,14 @@ button.tag:active{border-color:var(--brass-dim)}
 
 /* ---------- toast ---------- */
 #toast{position:fixed;left:50%;transform:translateX(-50%);
-  bottom:calc(var(--tabh) + env(safe-area-inset-bottom) + 16px);}
-#toast.high{bottom:auto;top:calc(env(safe-area-inset-top) + 16px);animation:toastHigh .25s}
-@keyframes toastHigh{from{opacity:0;transform:translate(-50%,-10px)}}
-#toast{
+  bottom:calc(var(--tabh) + env(safe-area-inset-bottom) + 16px);
   background:var(--raise);border:1px solid var(--line);color:var(--ink);
   padding:10px 17px;border-radius:999px;font-size:13.5px;z-index:80;
   animation:toast .25s;box-shadow:0 8px 26px #0009;max-width:88vw;text-align:center}
+/* Raised above an open sheet, which would otherwise sit on top of it. */
+#toast.high{bottom:auto;top:calc(env(safe-area-inset-top) + 16px);animation:toastHigh .25s}
 @keyframes toast{from{opacity:0;transform:translate(-50%,10px)}}
+@keyframes toastHigh{from{opacity:0;transform:translate(-50%,-10px)}}
 
 /* ---------- triage ---------- */
 .triage-bar{display:flex;gap:9px;margin-top:16px}
@@ -291,6 +303,20 @@ button.tag:active{border-color:var(--brass-dim)}
 .banner{background:#20242c;border:1px solid var(--line);border-left:2px solid var(--brass-dim);
   border-radius:0 9px 9px 0;padding:11px 14px;font-size:12.5px;color:var(--muted);
   line-height:1.55;margin:14px 0 0}
+/* ---------- recovery ----------
+   Replaces the app when the book won't open. Deliberately plain: this is the
+   one screen that has to be readable when everything else has gone wrong. */
+/* Above the nav (40), below the scrim and sheet (50/51) — the restore
+   confirmation has to open on top of this screen, not behind it. */
+#recovery{position:fixed;inset:0;z-index:45;background:var(--void);overflow-y:auto;
+  padding:calc(env(safe-area-inset-top) + 30px) var(--pad) 40px}
+#recovery h1{font-family:var(--serif);font-size:25px;font-weight:400;margin:0 0 14px;
+  letter-spacing:.01em}
+#recovery p{font-size:14.5px;color:var(--muted);line-height:1.6;margin:0 0 14px}
+#recovery .why{font-size:12px;color:var(--dim);line-height:1.5;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-word}
+#recovery .btn{margin-top:10px}
+
 @media (prefers-reduced-motion:reduce){
   *{animation-duration:.001s !important;transition-duration:.001s !important}
   .recharge.run{animation-duration:var(--cool) !important}

@@ -33,9 +33,14 @@ import java.util.Calendar
  */
 object Reminders {
 
-    /** Three is the cap in the UI too. More than that isn't a reminder. */
+    /**
+     * More than three isn't a reminder. This is the only definition of the
+     * cap: the page reads it off notifyState() instead of keeping a second
+     * copy — see notifyLimits() in js/reminders.js and docs/bridge.md.
+     */
     const val MAX = 3
 
+    /** Likewise the wording. One definition, sent across the bridge. */
     const val DEFAULT_TEXT = "The book is open. Where are you?"
 
     internal const val ACTION_FIRE = "com.spellbook.REMIND"

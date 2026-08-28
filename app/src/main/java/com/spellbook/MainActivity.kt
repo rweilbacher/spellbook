@@ -306,8 +306,10 @@ class MainActivity : ComponentActivity() {
         super.onPause()
         // Leaving the app finishes a note rather than losing it.
         if (voice.isRecording) voice.stop()
-        // Flush WebView's own caches; our data is already on disk after every edit.
-        web.evaluateJavascript("void 0", null)
+        // Nothing else belongs here. There was an evaluateJavascript("void 0")
+        // under a comment claiming it flushed WebView's caches; it flushed
+        // nothing. The book is written on every edit, so leaving the app has
+        // never had anything to save.
     }
 
     override fun onDestroy() {

@@ -4,8 +4,9 @@
     <color name="brass">#C4A05A</color>
 
     <!-- The rest of the web app's palette, needed now that the widget draws
-         outside the WebView. Keep these in step with the :root block in
-         assets/index.html. -->
+         outside the WebView. Keep these in step by hand with the :root block
+         in assets/css/app.css — entry 7 in the duplication register at
+         docs/bridge.md. -->
     <color name="slate">#191C22</color>
     <color name="line">#2C313A</color>
     <color name="ink">#E6E1D7</color>

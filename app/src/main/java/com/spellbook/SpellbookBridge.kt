@@ -10,6 +10,8 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * The whole persistence layer: one JSON file in the app's private directory,
@@ -26,6 +28,27 @@ import java.util.Locale
  */
 class SpellbookBridge(private val act: MainActivity) {
 
+    companion object {
+        private val DAILY = Regex("""^spellbook-\d{4}-\d{2}-\d{2}\.json$""")
+        private val PRE_RESTORE = Regex("""^pre-restore-\d{8}-\d{6}\.json$""")
+
+        /**
+         * The offsite copy runs here rather than on the caller's thread. One
+         * thread, so two saves can never write the same folder at once, and
+         * the page is never blocked on a SAF write to what may be a cloud
+         * mount. persist() fires on every card action; a hang here is felt as
+         * a random tap that sticks.
+         */
+        private val offsiteThread: ExecutorService =
+            Executors.newSingleThreadExecutor { r ->
+                Thread(r, "spellbook-offsite").apply { isDaemon = true }
+            }
+
+        /** The manual "Back up now" comes in on a binder thread while the
+         *  automatic one may be running here. One folder, one writer. */
+        private val offsiteLock = Any()
+    }
+
     private val ctx: Context get() = act
 
     private val book get() = File(ctx.filesDir, "spellbook.json")
@@ -33,11 +56,27 @@ class SpellbookBridge(private val act: MainActivity) {
     private val weeklyMarker get() = File(ctx.filesDir, "last-weekly-export")
     private val mediaDir get() = File(ctx.filesDir, "media").apply { mkdirs() }
 
-    /** Empty string means "nothing saved yet" — the web app then seeds itself. */
+    /** Empty string means "nothing saved yet" — but ask bookState() first. */
     @JavascriptInterface
     fun load(): String = runCatching {
         if (book.exists()) book.readText() else ""
     }.getOrDefault("")
+
+    /**
+     * "missing" | "ok" | "unreadable" — so the page can tell a first run from
+     * a book it must not overwrite.
+     *
+     * load() alone can't: an I/O failure on a book that exists returns "",
+     * the same answer as "there is no book", and the page then seeds over it.
+     * Three states used to collapse into one, and seeding is right for only
+     * one of them.
+     */
+    @JavascriptInterface
+    fun bookState(): String = when {
+        !book.exists() -> "missing"
+        runCatching { book.readText() }.isSuccess -> "ok"
+        else -> "unreadable"
+    }
 
     /** Write to a temp file first so a crash mid-write can't leave a half book. */
     @JavascriptInterface
@@ -48,7 +87,11 @@ class SpellbookBridge(private val act: MainActivity) {
             if (book.exists()) book.delete()
             if (!tmp.renameTo(book)) book.writeText(json)
             rollBackup(json)
-            offsite(json)
+            // Off the caller's thread: the JavaScript call is blocked until
+            // this method returns, and offsite() can reach a cloud-backed
+            // provider. The book is already on disk by this line, which is
+            // the part the page is actually waiting for.
+            offsiteThread.execute { runCatching { synchronized(offsiteLock) { offsite(json) } } }
             // The widget reads this file for itself, so a spell buried or
             // edited here shows up on the home screen now rather than at the
             // next midnight. Cheap when no widget is placed.
@@ -66,11 +109,82 @@ class SpellbookBridge(private val act: MainActivity) {
         val snap = File(backupDir, "spellbook-$stamp.json")
         if (snap.exists()) return
         snap.writeText(json)
+        // Prune the dailies only. The pre-restore copies beside them are kept
+        // by their own rule, and sort under a different prefix.
         backupDir.listFiles()
+            ?.filter { DAILY.matches(it.name) }
             ?.sortedByDescending { it.name }
             ?.drop(7)
             ?.forEach { it.delete() }
     }
+
+    /**
+     * The snapshots above, newest first, as the page's "Earlier versions"
+     * list. Seven days of dailies plus any pre-restore copies. They have
+     * existed since the first save; until now nothing could reach them
+     * without adb.
+     *
+     * [{"name":"spellbook-2026-08-27.json","at":1787…,"bytes":102400,"spells":148}]
+     */
+    @JavascriptInterface
+    fun snapshots(): String = runCatching {
+        val arr = JSONArray()
+        backupDir.listFiles().orEmpty()
+            .filter { it.isFile && safeSnapshot(it.name) }
+            .sortedByDescending { it.lastModified() }
+            .forEach { f ->
+                // Counting spells means parsing the file. Seven files of about
+                // 100KB, once, when the list is opened — worth it, because a
+                // date alone doesn't tell you which copy you want.
+                val spells = runCatching {
+                    JSONObject(f.readText()).optJSONArray("spells")?.length() ?: -1
+                }.getOrDefault(-1)
+                arr.put(
+                    JSONObject()
+                        .put("name", f.name)
+                        .put("at", f.lastModified())
+                        .put("bytes", f.length())
+                        .put("spells", spells)
+                )
+            }
+        arr.toString()
+    }.getOrDefault("[]")
+
+    /** Read one back. Returns the JSON text, or "" if the name isn't one of ours. */
+    @JavascriptInterface
+    fun readSnapshot(name: String): String {
+        if (!safeSnapshot(name)) return ""
+        return runCatching {
+            val f = File(backupDir, name)
+            if (f.isFile) f.readText() else ""
+        }.getOrDefault("")
+    }
+
+    /**
+     * The book as it stands, kept beside the snapshots before something
+     * replaces it, so a restore started by mistake is itself reversible.
+     * Returns the name written, or "" if it couldn't be.
+     */
+    @JavascriptInterface
+    fun preRestoreBackup(json: String): String = runCatching {
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        val f = File(backupDir, "pre-restore-$stamp.json")
+        f.writeText(json)
+        // Three is plenty: these exist to undo the restore you just did.
+        backupDir.listFiles()
+            ?.filter { PRE_RESTORE.matches(it.name) }
+            ?.sortedByDescending { it.name }
+            ?.drop(3)
+            ?.forEach { it.delete() }
+        f.name
+    }.getOrDefault("")
+
+    /**
+     * A name the page handed back is only ever one we wrote. Validated
+     * before the filesystem is touched at all — the same discipline as
+     * VoiceRecorder.safeName, and for the same reason.
+     */
+    private fun safeSnapshot(name: String) = DAILY.matches(name) || PRE_RESTORE.matches(name)
 
     /**
      * The daily backup above lives in the app's private directory, which an
@@ -237,6 +351,6 @@ class SpellbookBridge(private val act: MainActivity) {
      *  reports what happened, rather than guessing. */
     @JavascriptInterface
     fun backupNow(json: String): String = runCatching {
-        act.backups.writeNow(json, mediaDir).toString()
+        synchronized(offsiteLock) { act.backups.writeNow(json, mediaDir) }.toString()
     }.getOrDefault(JSONObject().put("ok", false).put("message", "The backup didn't finish").toString())
 }

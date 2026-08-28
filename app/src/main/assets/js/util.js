@@ -5,9 +5,13 @@
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
-const active = () => doc.spells.filter(s => s.state === 'active');
-const buried = () => doc.spells.filter(s => s.state === 'graveyard');
-const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const active = () => doc.spells.filter(s => s.state === ACTIVE);
+const buried = () => doc.spells.filter(s => s.state === GRAVEYARD);
+/* Every attribute this app writes is double-quoted, so ' was already safe —
+   but "safe because of a convention held somewhere else" is not a property
+   you want in the one function everything untrusted passes through. */
+const esc = s => s.replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = () => 'sp_' + Math.random().toString(16).slice(2,10);
 const nid = () => 'nt_' + Math.random().toString(16).slice(2,10);
 const now = () => new Date().toISOString();
@@ -34,7 +38,7 @@ function buzz(ms){ if(navigator.vibrate) try{ navigator.vibrate(ms); }catch(e){}
 
 function allTags(){
   const c = new Map();
-  for(const s of doc.spells){ if(s.state!=='active') continue;
+  for(const s of doc.spells){ if(s.state !== ACTIVE) continue;
     for(const t of tagsOf(s)) c.set(t, (c.get(t)||0)+1); }
   return [...c.entries()].sort((a,b)=> b[1]-a[1] || a[0].localeCompare(b[0]));
 }

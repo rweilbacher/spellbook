@@ -18,12 +18,33 @@
    ========================================================================= */
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
+/* The cap and the default wording are Kotlin's — Reminders.MAX and
+   Reminders.DEFAULT_TEXT — and notifyState() has been sending both across
+   the bridge all along. The page used to keep its own copies and ignore
+   what it was told, which is exactly how two constants drift apart. Read
+   once: they're compile-time constants on the other side. The fallbacks are
+   for preview mode, where there is no bridge to ask. */
+const NOTIFY_MAX_FALLBACK = 3;
+const NOTIFY_TEXT_FALLBACK = 'The book is open. Where are you?';
+let notifyLimitsCache = null;
+function notifyLimits(){
+  if(!notifyLimitsCache){
+    const st = notifyState();
+    const max = Number(st.max);
+    notifyLimitsCache = {
+      max: max > 0 ? max : NOTIFY_MAX_FALLBACK,
+      defaultText: (typeof st.defaultText === 'string' && st.defaultText) || NOTIFY_TEXT_FALLBACK
+    };
+  }
+  return notifyLimitsCache;
+}
+
 /** Always stored sorted, deduped and capped, so an index into the list in
  *  the sheet is an index into the setting. */
 function cleanTimes(list){
   if(!Array.isArray(list)) return [];
   return [...new Set(list.filter(t => typeof t === 'string' && TIME_RE.test(t)))]
-    .sort().slice(0, NOTIFY_MAX);
+    .sort().slice(0, notifyLimits().max);
 }
 
 function notifyState(){
@@ -71,7 +92,8 @@ function saveTimes(list){
 function openReminders(keep){
   const st = notifyState();
   const times = S.notifyTimes || [];
-  const custom = (S.notifyText || '') !== DEFAULTS.notifyText;
+  const lim = notifyLimits();
+  const custom = (S.notifyText || '') !== lim.defaultText;
 
   const rows = times.length ? times.map((t,i)=>`
     <div class="item" style="cursor:default;gap:10px">
@@ -83,8 +105,8 @@ function openReminders(keep){
     </div>`).join('')
     : `<p class="help" style="margin:0 0 16px">None set. The book only speaks when you open it.</p>`;
 
-  sheet('Reminders', `
-    <p class="help" style="margin-top:0">Up to three a day. Tapping one opens the
+  sheet('reminders', 'Reminders', `
+    <p class="help" style="margin-top:0">Up to ${lim.max} a day. Tapping one opens the
       book at the sigil — nothing is drawn until you cast.</p>
 
     ${!st.supported ? `<div class="banner">Preview mode has no alarms to set. Inside
@@ -96,15 +118,15 @@ function openReminders(keep){
       </div>` : ''}
 
     <div id="nRows">${rows}</div>
-    ${times.length < NOTIFY_MAX
+    ${times.length < lim.max
       ? `<button class="btn ghost" id="nAdd">Add a time</button>`
-      : `<p class="help" style="margin:4px 0 0">Three is the most it will hold.</p>`}
+      : `<p class="help" style="margin:4px 0 0">That's the most it will hold.</p>`}
 
     <p class="help" style="margin:24px 0 8px">What it says</p>
     <input type="text" id="nText" maxlength="120" style="width:100%"
-      value="${esc(S.notifyText || DEFAULTS.notifyText)}">
+      value="${esc(S.notifyText || lim.defaultText)}">
     ${custom ? `<button class="btn ghost" id="nReset" style="margin-top:10px">Put the default wording back</button>` : ''}
-  `, null, keep);
+  `, {keep});
 
   $('#nRows').querySelectorAll('input[data-at]').forEach(inp => inp.onchange = () => {
     const list = (S.notifyTimes || []).slice();
@@ -145,7 +167,7 @@ function openReminders(keep){
      rather than posting an empty notification. */
   let textTimer = null;
   const commitText = raw => {
-    const next = (raw || '').trim() || DEFAULTS.notifyText;
+    const next = (raw || '').trim() || notifyLimits().defaultText;
     if(next === S.notifyText) return;
     S.notifyText = next;
     persist();
@@ -162,7 +184,7 @@ function openReminders(keep){
     openReminders(true);            // canonical value back into the field
   };
   if($('#nReset')) $('#nReset').onclick = () => {
-    S.notifyText = DEFAULTS.notifyText;
+    S.notifyText = notifyLimits().defaultText;
     persist(); renderVault(); openReminders(true);
   };
 }

@@ -1,0 +1,29 @@
+# The smoke suite. Deliberately a separate workflow from Build APK: it takes
+# well under a minute, never touches the Gradle path, and a red test must not
+# stop you getting an APK you wanted anyway.
+name: Smoke test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install
+        working-directory: tools
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run the suite
+        run: node tools/smoke.mjs

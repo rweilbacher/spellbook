@@ -27,7 +27,7 @@ function openBackupFolder(bk){
   const when = bk.lastAt
     ? 'Last copied ' + noteTime(new Date(bk.lastAt).toISOString())
     : 'Nothing copied there yet';
-  sheet('Backup folder', `
+  sheet('backup-folder', 'Backup folder', `
     <p class="help" style="margin-top:0">${bk.set
       ? `The book and every recording are copied into <b>${esc(bk.label)}</b> once a day, riding along on an ordinary save. ${esc(when)}.`
       : `Pick a folder and the book and its recordings get copied there once a day. Choose one a sync app already watches and it reaches your cloud with nothing more to set up.<br><br>Until then a weekly copy of the book alone goes to Downloads.`}</p>
