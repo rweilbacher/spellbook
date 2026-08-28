@@ -6,12 +6,36 @@ Working document for the implementer. Written 2026-08-28 against `main` at
 Every line number refers to `index.html` as it stands at the commit above —
 re-check them if the file has moved on.
 
-**What's built:** R4 only. `tools/smoke.mjs` — 24 checks, ~7 seconds, no APK
-required. It found F5.1 unprompted on its first run against unmodified `main`.
+## Status
 
-**What's still analysis:** everything else. Five decisions open (D1–D5, at the
-bottom); see also *Environment notes* and *The repo is public* near the end,
-which supersede parts of the first draft.
+**Landed** — all verified by `tools/smoke.mjs`, **37 checks, 0 failures**:
+
+- **R4** — the smoke test. No APK required; ~7s. Found F5.1 unprompted on its
+  first run, then caught a fixture coupling in its own `drawn` assertion when
+  the seed changed. Now 37 checks.
+- **R5a** — F5.1 fixed. `@keyframes pulse` → `pulse-dot` for the recorder dot,
+  so the sigil gets its intended opacity breath back.
+- **R2 + D1** — the seed is synthetic and lives in `assets/js/seed.js`.
+  46 spells, 18.8 KB (was 148 spells, 67 KB). Covers every situation tag, all
+  four form tags, every computed tag, the three markup forms, multi-line,
+  >300-character and non-ASCII text, HTML metacharacters, all three source
+  origins, both note types, and the graveyard — so the test suite has a fixture
+  that asserts against it rather than around it.
+- **R3a + D2 + D3** — partial split, plain script tags. Eight cold files
+  extracted: `css/app.css`, `js/seed.js`, `js/store.js`, `js/util.js`,
+  `js/voice.js`, `js/backup.js`, `js/reminders.js`, `js/sheet.js`.
+  **`index.html`: 2,133 → 1,355 lines, ~49.7k → ~17.3k tokens.**
+
+Verification beyond the suite: concatenating the extracted files back together
+and diffing against the original script block gives exactly one differing line
+(the intentional seed change), and the CSS is identical apart from the R5a
+rename. Screenshots of the draw, book and vault screens confirm the external
+stylesheet renders.
+
+**Next up:** R1 (recovery) — the highest-value item and the only one that needs
+Kotlin, so it needs a build to verify. Then R6/R7 (docs), then the rest of R5.
+
+**Still open:** D4 — see *Purging the seed from history*, below.
 
 ---
 
@@ -821,9 +845,111 @@ The three actual options, in ascending order of effort:
 - **Leave it.** Defensible. The content is personal but not sensitive in the
   credential sense, and the realistic exposure is scraping rather than attack.
 
-**Recommendation:** private now (it's one click and costs nothing), R2 anyway
-for the token reason, and history rewriting only if the material genuinely
-bothers you on reflection. There's no urgency, but private-now is free.
+**Decided: stays public, and the history gets purged.** See below.
+
+---
+
+## Purging the seed from history
+
+**D4 answered: keep the repo public, remove the spell data from git.** Now that
+`index.html` no longer contains the seed, the only copies left are historical.
+
+I can't run these — no shell on the device this session, and a force-push needs
+your credentials — so they're written out to run yourself. **Take a backup
+first:** `git clone --mirror` the repo to somewhere safe before anything below.
+
+### Step 0 — find every copy, not just the obvious one
+
+Before rewriting, establish what actually needs to go. The seed line is the
+known one; these check for the others:
+
+```bash
+# Which commits ever touched a seed line, and what shape was it in?
+git log --all --oneline -S'const SEED' -- app/src/main/assets/index.html
+
+# Was a built APK or zip ever committed? Both embed the seed.
+# (.gitignore covers them now, but it was added in commit 4 of 20.)
+git log --all --diff-filter=A --name-only --format= | sort -u | grep -iE '\.(apk|zip)$'
+
+# Any spell text that leaked into other files?
+git log --all -S'sp_9e539136' --oneline        # a real id from the old seed
+
+# The five biggest blobs in history — a stray APK shows up here immediately.
+git rev-list --objects --all \
+  | git cat-file --batch-check='%(objecttype) %(objectname) %(objectsize) %(rest)' \
+  | awk '$1=="blob"' | sort -k3 -n -r | head -5
+```
+
+### Step 1 — rewrite, keeping the commit history
+
+`git-filter-repo` is the maintained tool (`git filter-branch` is deprecated and
+much slower; the BFG is fine but less precise). It preserves your 19 commit
+messages, which is why I'd use it over an orphan commit.
+
+```bash
+pip install git-filter-repo
+cd /tmp && git clone https://github.com/rweilbacher/spellbook.git purge && cd purge
+
+cat > expressions.txt <<'EOF'
+regex:const SEED = \[\{"id".*\];==>const SEED = [];
+EOF
+
+git filter-repo --replace-text expressions.txt
+# add --path app-debug.apk --invert-paths (etc.) if step 0 found committed binaries
+```
+
+Adjust the regex if step 0 shows the seed took a different shape in early
+commits — the line is anchored on `const SEED = [{"id"` and ends at `];`, which
+matches every version I can see in the current file, but I can't read history
+from here.
+
+Then verify **before** pushing:
+
+```bash
+git log --all -S'sp_9e539136' --oneline     # must print nothing
+git grep -I 'const SEED = \[{' $(git rev-list --all) | head   # must print nothing
+```
+
+### Step 2 — get it off GitHub for real
+
+This is the part that gets skipped and matters most. A force-push does **not**
+remove the old objects from GitHub: unreachable commits stay retrievable by SHA
+for a long time, and cached diff views can outlive them.
+
+Two ways to close that, in order of certainty:
+
+- **Delete the repository and recreate it** (Settings → Danger Zone), then push
+  the rewritten history to the fresh remote. Guarantees no dangling objects.
+  Costs the Actions run history, and any stars/issues/watchers — check what
+  you'd lose first. For a personal repo this is usually nothing.
+- **Force-push, then ask GitHub Support to garbage-collect** the repository and
+  purge cached views. They do this on request; it's just slower and you're
+  trusting a process rather than a deletion.
+
+Either way: **check for forks first** (`Insights → Forks`). A fork keeps its own
+copy and GitHub will not rewrite someone else's repository. If there are any,
+deletion of your copy doesn't reach them.
+
+```bash
+git remote set-url origin https://github.com/rweilbacher/spellbook.git
+git push --force --all && git push --force --tags
+```
+
+Afterwards, `git clone` fresh somewhere and grep it, rather than trusting the
+local rewrite. And note your working copy at
+`C:\Users\Roland\Google Drive\Projects\spellbook` will need re-cloning or a
+hard reset, since every commit SHA changes.
+
+### Step 3 — what stays
+
+`spellbook-features.md` quotes a handful of spell-like lines as examples
+(*watch your feet*, *what's the vulnerable thing?*, the invented dark-spell
+examples). Those are illustrations in a design document, not the book. Leaving
+them is fine unless you'd rather they weren't there.
+
+**Worth knowing:** none of this is urgent, and none of it blocks the remaining
+work. The forward leak is already closed — the seed in the repo today is
+synthetic.
 
 **The keystore does not matter, and the earlier report over-weighted it.**
 Correct on the substance: it signs a sideloaded personal APK. It is not a Play

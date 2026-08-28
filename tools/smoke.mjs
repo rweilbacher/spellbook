@@ -49,15 +49,36 @@ await page.waitForFunction(() => typeof doc !== 'undefined' && Array.isArray(doc
 
 // ---------------------------------------------------------------- boot
 const n = await page.evaluate(() => doc.spells.length);
-check('book seeds from SEED', n > 0, `got ${n} spells`);
+check('book seeds from window.SEED', n > 0, `got ${n} spells`);
+check('seed covers every situation', await page.evaluate(() => {
+  const have = new Set(doc.spells.flatMap(s => s.tags));
+  return SITUATIONS.filter(t => !have.has(t));
+}).then(missing => missing.length === 0, () => false));
+check('seed covers the form tags', await page.evaluate(() => {
+  const have = new Set(doc.spells.flatMap(s => s.tags));
+  return ['practice', 'prompt', 'flagged', 'inbox'].every(t => have.has(t));
+}));
+check('seed covers the computed tags', await page.evaluate(() => {
+  const all = new Set(doc.spells.filter(s => s.state === 'active').flatMap(tagsOf));
+  return ['question', 'untagged', 'useful'].every(t => all.has(t));
+}));
+check('seed includes buried spells', await page.evaluate(() => buried().length) > 0);
+check('seed includes both note types', await page.evaluate(() => {
+  const kinds = new Set(doc.spells.flatMap(s => (s.notes || []).map(x => x.type)));
+  return kinds.has('text') && kinds.has('voice');
+}));
+check('desk starts empty (no baked timestamps to rot)',
+  await page.evaluate(() => doc.spells.every(s => !s.desked)));
 
 // ---------------------------------------------------------------- the draw
+const drawnBefore = await page.evaluate(() => doc.spells.reduce((n, s) => n + s.drawn, 0));
 await page.click('#sigilBtn');
 await page.waitForSelector('#results .card', { timeout: 5000 });
 check('cast reveals a card', await page.locator('#results .card').count() === 1);
 check('draw enters revealed state', await page.locator('#draw.revealed').count() === 1);
-check('cast increments drawn',
-  await page.evaluate(() => doc.spells.filter(s => s.drawn > 0).length) === 1);
+const drawnAfter = await page.evaluate(() => doc.spells.reduce((n, s) => n + s.drawn, 0));
+check('cast increments drawn by exactly one', drawnAfter === drawnBefore + 1,
+  `${drawnBefore} → ${drawnAfter}`);
 
 // ---------------------------------------------------------- quick actions
 await page.click('#results .card [data-act="useful"]');
@@ -121,13 +142,43 @@ check('weightOf multiplies inbox and flagged', await page.evaluate(() => {
   return weightOf(s) === (S.inboxWeight * S.flaggedWeight);
 }));
 
+// ------------------------------------------------------ awkward content
+// The seed carries these on purpose; this is what it is for.
+check('markup renders as bold / italic / highlight', await page.evaluate(() => {
+  const h = fmt('**a** *b* ==c==');
+  return h.includes('<b>a</b>') && h.includes('<em>b</em>') && h.includes('<i class="mk">c</i>');
+}));
+check('HTML metacharacters are escaped, not interpreted', await page.evaluate(() => {
+  const s = doc.spells.find(x => x.text.includes('<like this>'));
+  if (!s) return false;
+  const h = fmt(s.text);
+  return h.includes('&lt;like this&gt;') && h.includes('&amp;') && !h.includes('<like');
+}));
+check('long text gets the small size class', await page.evaluate(() =>
+  doc.spells.some(s => s.text.length > 300) &&
+  sizeClass(doc.spells.find(s => s.text.length > 300).text) === 'sm'));
+check('short text gets the large size class', await page.evaluate(() =>
+  sizeClass('Watch your feet.') === 'lg'));
+check('multi-line text survives intact', await page.evaluate(() =>
+  doc.spells.some(s => s.text.includes('\n'))));
+check('non-ASCII survives intact', await page.evaluate(() =>
+  doc.spells.some(s => /[äöüàéâ’—]/.test(s.text))));
+check('graveyard is browsable', await (async () => {
+  return await page.evaluate(() => { libGrave = true; libTag = null; go('library'); return true; });
+})() && await page.locator('#libList .row.gone').count() > 0);
+await page.evaluate(() => { libGrave = false; go('draw'); });
+
 // ---------------------------------------------------------- CSS integrity
 // A later @keyframes silently replaces an earlier one of the same name.
 const dupes = await page.evaluate(() => {
   const seen = {}, dup = [];
-  for (const sheet of document.styleSheets)
-    for (const r of sheet.cssRules)
+  for (const sheet of document.styleSheets) {
+    let rules;
+    // Reading cssRules on a cross-origin sheet throws; serve over http, not file://
+    try { rules = sheet.cssRules; } catch { return ['<stylesheet unreadable>']; }
+    for (const r of rules)
       if (r.type === CSSRule.KEYFRAMES_RULE) seen[r.name] ? dup.push(r.name) : seen[r.name] = 1;
+  }
   return dup;
 });
 check('no duplicate @keyframes', dupes.length === 0, dupes.join(', '));
