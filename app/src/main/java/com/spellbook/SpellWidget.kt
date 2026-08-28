@@ -105,8 +105,13 @@ class SpellWidget : AppWidgetProvider() {
         ) {
             val views = RemoteViews(context.packageName, R.layout.widget_spell)
 
+            // A tap lands on this spell's own detail sheet, not just the app —
+            // the page reads this the same way it reads a reminder's "draw".
             val open = Intent(context, MainActivity::class.java)
                 .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            if (spell != null) {
+                open.putExtra(MainActivity.EXTRA_OPEN, MainActivity.OPEN_SPELL_PREFIX + spell.id)
+            }
             views.setOnClickPendingIntent(
                 android.R.id.background,
                 PendingIntent.getActivity(

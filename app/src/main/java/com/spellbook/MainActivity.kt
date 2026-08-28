@@ -321,5 +321,9 @@ class MainActivity : ComponentActivity() {
          *  launcher opened the app. */
         const val EXTRA_OPEN = "com.spellbook.OPEN"
         const val OPEN_DRAW = "draw"
+
+        /** Followed by a spell id: land on that spell's detail sheet rather
+         *  than a screen. What the widget asks for when it's tapped. */
+        const val OPEN_SPELL_PREFIX = "spell:"
     }
 }

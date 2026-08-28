@@ -496,8 +496,17 @@ function boot(){
   renderAll();
   // A reminder that started the app wants the sigil, not wherever the page
   // happened to open. Asked for rather than pushed, because the tap happened
-  // before this script existed.
-  if(openRequest() === 'draw') freshDraw();
+  // before this script existed. A widget tap wants that spell's own detail
+  // sheet instead — same channel, a different shape of answer.
+  handleOpenRequest(openRequest());
+}
+
+/* What a tap outside the app wanted the page to land on. Shared by boot()
+   (Bridge.openRequest(), read once) and window.onNative's 'open' event
+   (the app was already running, so the tap arrives live instead). */
+function handleOpenRequest(target){
+  if(target === 'draw') freshDraw();
+  else if(target && target.startsWith('spell:')) openSpellFromWidget(target.slice(6));
 }
 
 /* One-time migration: the old filter sheet let any tag cycle through
@@ -1083,10 +1092,11 @@ window.onNative = function(raw){
     if(!$('#vault').classList.contains('hide')) renderVault();
     return;
   }
-  /* A reminder tapped while the app was already open — onCreate never ran, so
-     this arrives as an event rather than through openRequest(). */
+  /* A reminder or widget tapped while the app was already open — onCreate
+     never ran, so this arrives as an event rather than through
+     openRequest(). */
   if(e.kind === 'open'){
-    if(e.target === 'draw') freshDraw();
+    handleOpenRequest(e.target);
     return;
   }
   /* Either an answer to the prompt, or the quiet re-check on resume that
@@ -1358,6 +1368,19 @@ function openSpell(s){
 function openTag(t){
   libTag = t; libGrave = false; $('#search').value = '';
   closeSheet(); go('library');
+}
+
+/* What a widget tap asks for: that spell's detail sheet, directly, rather
+   than just the app. Lands on the draw screen underneath it — same as a
+   reminder's freshDraw() — since a widget tap isn't "go to the library",
+   it's "here's the spell you already saw". A spell that's since been
+   buried or deleted (id no longer in doc.spells) falls back to freshDraw()
+   rather than opening nothing. */
+function openSpellFromWidget(id){
+  const s = doc.spells.find(x => x.id === id);
+  if(!s){ freshDraw(); return; }
+  go('draw');
+  openSpell(s);
 }
 
 /* =========================================================================

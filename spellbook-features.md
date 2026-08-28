@@ -78,6 +78,7 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 - **Voice notes on a spell.** A *Say it instead* button in both note composers; the recording itself is native Kotlin, because the web layer can ask for a microphone but not choose which one, and choosing is most of the point. Audio lands in `files/media/` as one AAC file per note, with only the filename on the note — a voice note is `{type:'voice', file, duration}` in the same thread as the text ones, exactly the slot the notes array was shaped for. Plays back in the thread over the app's own internal origin, so nothing had to loosen file access. Records through a Bluetooth headset when one is connected, off a toggle in the Vault, and **the recorder names the microphone it is actually on while you record** rather than the one it asked for — the first version reported the request and was wrong about it. Deleting a note deletes its audio; audio no note refers to is swept at boot. Not available in desktop preview, where there's no bridge to record through.
 - **A backup folder you choose.** Vault → *Backup folder*, picked once and remembered. The book plus every recording is copied there once a day, riding along on an ordinary save the way the weekly export already did: dated JSON snapshots, fourteen kept, and `media/` as a mirror — each recording copied once and never again, matched by stem so a provider renaming the extension can't turn the mirror into a pile of duplicates. Point it at a folder some sync app already watches and the offsite copy needs no code here. Pick nothing and the weekly Downloads export carries on unchanged, so the app is never less safe than it was. The export itself still carries no audio, and a book restored from one shows those notes as *recording lost*.
 - **The home screen widget.** One spell, changing at midnight, tapping opens the book. Native Kotlin reading `spellbook.json` directly — the thing the plain file was always for. Read-only: nothing on the home screen counts as a draw, so it can't race the WebView's save. Which spell you get is derived rather than stored — the day number seeds the pick, so every refresh inside a day agrees, and the three weeks before it are recomputed to keep a spell from coming round twice in a week. Draw weights apply, sticky filters don't. Spec below.
+- **Widget tap opens that spell's detail sheet**, rather than just landing on whatever screen the app remembers. Resolves half of the widget's open question, below — the intent now carries `spell:<id>` through `MainActivity`'s existing `EXTRA_OPEN` channel (the same one reminders already use for `draw`), and the page routes straight to `openSpell()` for that spell on boot and on a live `onNative` open event alike. Long-press re-roll is still open.
 - **Daily reminders.** Vault → *Being called* → **Reminders**. Up to three times a day, each a row with a time picker; a shared message, editable, defaulting to *The book is open. Where are you?*. Tapping one opens the book at the sigil with the last cast cleared away and **nothing drawn** — the notification is a knock, not a draw, which is what keeps `drawn` and `lastDrawn` honest when a reminder goes unopened. Times and wording are settings in `spellbook.json` like everything else, so they export, back up and restore with the book, and Kotlin reads them at boot without the WebView exactly as the widget reads spells. One alarm per slot, inexact and allowed while idle — the widget's midnight bargain, no exact-alarm prompt, a few minutes of drift at worst. Re-armed after each fire, on every launch, and on the four broadcasts that invalidate an alarm: boot, app update, clock change, timezone change. A save re-arms only when the times actually changed, compared against a stored signature, since the book is written on every edit and the times change twice a year. `POST_NOTIFICATIONS` is asked for the first time a time is set and never otherwise; two refusals and Android stops showing the prompt, so the Vault offers a way through to system settings, and coming back from there re-checks quietly rather than going on insisting it's blocked. One notification id for all three slots — an unread reminder is replaced rather than stacked.
 - **minSdk raised to 31.** Voice notes route microphone input with `setCommunicationDevice`, which arrived in Android 12. The deprecated `startBluetoothSco` path it replaces wasn't worth carrying for a personal app on a phone running 16.
 
@@ -92,8 +93,13 @@ A spell matching no situation keeps no tags and shows as `untagged`. That pile i
 ## Next
 
 - **Two kinds of import.** Spec below.
-- **Weighted draw**, defaulting to favouring the never-drawn. One switch, reversible.
+- **Weighted draw**, defaulting to favouring the never-drawn. One switch, reversible. (Related finding: the draw's no-repeat window — `recent`, capped at `S.noRepeat`, default 12 — is a plain in-memory array, not persisted anywhere. It resets to empty on every app reload, so "no repeat in the last 12" only holds within a single session. The widget's version of the same idea doesn't have this gap — it reconstructs the last three weeks deterministically from the day number instead of remembering anything — worth keeping in mind if "the draw feels more random than the widget" keeps coming up: some of that may be this, not the weighting. The less-random idea below is about the draw, not the widget.)
 - **Exhume.** Occasionally the draw offers something buried, marked as such. Keeps burial from feeling final.
+- **Widget cadence.** Turning more than once a day, and no longer turning on save. Still being shaped — see "The widget", above.
+- **Per-screen filters** — draw, book and widget each get their own, replacing the one shared sticky filter. Spec below.
+- **The shelf.** A third disposition alongside active/graveyard — not deleted, just not relevant right now. Spec below.
+- **Desk amounts and history.** Spec below.
+- **A faster way to clear filters in the library.** Today, clearing an active Require/Never/Situation filter means opening the Filters sheet and tapping "Clear all filters" — the tag and graveyard chips next to it (`#clearTag`, `#clearGrave`) already carry their own inline ✕, the filter chip (`#libFilterChip`) doesn't. An ✕ there when a filter is active, or a small clear control beside the sort chip, would match the pattern already on screen.
 
 ## Later
 
@@ -359,10 +365,109 @@ is whatever size you dragged it to, so the TextView autosizes between 12 and
 21sp rather than picking a size in code. The editor's `**bold**`, `*italic*` and
 `==highlight==` come across as spans.
 
-Open: whether a long-press should offer a re-roll, and whether tapping should
-land on that spell's detail sheet rather than the app — the second needs an
-intent extra through `MainActivity` into the page, which is the first thing the
-widget would have to ask of the web app.
+Open: whether a long-press should offer a re-roll.
+
+**Cadence — under discussion.** The turn is currently once a day at midnight,
+and `save()` also refreshes the rendered widget on every book change — not by
+re-rolling a new day, but by re-reading `spellOfTheDay()` for today, which can
+land on a *different* spell mid-day if the pool it draws from changed (a tag
+edited, a spell buried, a weight tuned). That reads as the widget re-rolling on
+a whim, when what actually moved was the input, not the pick.
+
+Two changes are on the table, and they're separable:
+
+1. **Turn more than once a day** — every couple of hours rather than only at
+   midnight. Needs a period number in place of `dayNumber()`, and the
+   no-repeat window (currently 7 real days, seeded by a 21-day warm-up walk)
+   rescaled to periods rather than days.
+2. **Stop turning on save.** If a save should no longer be able to change
+   *which* spell is showing — only the clock should — then
+   `SpellbookBridge.save()` can't just call `SpellWidget.refresh()` and trust
+   `spellOfTheDay()` to reproduce the same answer, because it might not (see
+   above). Two ways to hold that line: keep `refresh()` on save but make the
+   pick itself immune to pool changes within a period (fiddly, since "derived,
+   never stored" is the whole reason the widget can't race the WebView's
+   save); or stop calling `refresh()` from save entirely and let only the
+   periodic alarm turn the widget over, accepting that an edit to the
+   currently-shown spell won't reach the home screen until the next period
+   boundary.
+
+Open: the period length (a couple of hours is the instinct, not yet a number),
+and which of the two "stop turning on save" approaches to take — they trade a
+slightly stale home screen against keeping the derived-not-stored guarantee
+that's the reason the widget can't race a save in the first place.
+
+## Per-screen filters
+
+Right now there is exactly one sticky filter (`S.include` / `S.require` /
+`S.exclude`), and the draw, the library and Vault → The draw → **Filters** all
+read and write the same one — `openFilters()` is the one sheet, opened from
+three places. The widget doesn't apply it at all (see "Weights yes, filters
+no", above) — deliberately, but that leaves no way to ask for a *narrower*
+home screen without also narrowing the draw and the book.
+
+**The proposal:** three independent sticky filters instead of one — draw,
+book (library), and widget. Each screen keeps, or gets, its own inline filter
+chip to edit its own filter in place; the Vault's standalone **Filters** item
+goes away for draw and book, since editing in context replaces the reason it
+existed. The widget has no screen of its own to hold a chip, so its filter
+stays configurable from the Vault — the one case where the Vault keeps a
+Filters entry.
+
+Open: whether the widget's filter, once it exists, composes with or replaces
+its existing weights (`inboxWeight`/`flaggedWeight`) — those aren't going
+anywhere, this is additive; and what the default is for a book that's never
+set a widget filter (presumably: none, same as today).
+
+## The shelf
+
+A third disposition, next to active and graveyard: not relevant *right now*,
+without the finality of burial. "Something that's not a deletion but a 'not
+relevant at this time of my life.'"
+
+Distinct from both existing mechanisms it could be confused with:
+
+- **Not `flagged`.** Flagged means *reconsider this* — wrong import, tried
+  and it didn't help — and still gets drawn, just down-weighted by
+  `flaggedWeight`. It's a quality signal about the spell itself.
+- **Not the graveyard.** `state:'graveyard'` (the only other value `state`
+  takes today) reads as a stronger, more final move: buried, reversible, but
+  out. Shelving is a life-context signal, not a verdict on the spell.
+
+Open: tag or state. The inbox precedent (see "The inbox — shipped", above)
+argues for a tag — it comes with rename/remove and Require/Never filtering
+for free, the same as `flagged`, and matches how a spell's disposition has
+consistently ended up modelled here. The difference from `flagged`/`inbox` is
+that a shelved spell probably shouldn't be drawn or widgeted at all by
+default, which a plain tag doesn't get you automatically — it would need to
+be built into `pool()` and `Book.spellOfTheDay()` directly (excluded unless
+explicitly filtered back in), the way `state !== 'active'` already is, rather
+than left to Require/Never like an ordinary tag.
+
+## Desk amounts and history
+
+Today the desk (`s.desked`, a single timestamp) only tells you what's on it
+*right now*: fresh for `DESK_DAYS` (3), fading for another `DECAY_DAYS` (3),
+then `deskState()` returns `null` and the spell quietly stops appearing
+anywhere — the desk screen, the "Desk" row on the detail sheet — with no
+record it was ever there. Re-pinning overwrites the one timestamp, so a spell
+pinned five times over a year looks the same as one pinned once.
+
+Two related asks:
+
+- **Amounts** — how many times has this spell been pinned, total? A counter
+  next to `desked`, incremented on every desk action, the same shape as
+  `useful`/`drawn`.
+- **History** — a record of past desk stays, not just the current one. The
+  notes array's shape (`{id, type, text, createdAt}`) already generalises to
+  this — a `{type:'desked', createdAt}` entry per pin would give a thread of
+  desk history for free, on the same mechanism that already carries voice
+  notes without restructuring (see "Text notes on a spell", above) — rather
+  than a new array shape.
+
+Open: whether history should log every pin, or only pins that survive long
+enough to matter (a re-pin within the fresh window arguably isn't a new
+"visit").
 
 ## Dark spells
 
