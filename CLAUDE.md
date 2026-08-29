@@ -78,7 +78,10 @@ single `persist()` for the whole of boot. Add one to `runMigrations()` and bump
 **Three load-bearing principles**, from `docs/design.md`:
 
 - Derived properties are never stored. Computed tags, desk decay, the widget's
-  day-seeded pick — all recomputed, so an edit can't leave them lying.
+  day-seeded pick — all recomputed, so an edit can't leave them lying. The one
+  exception is `doc.tags`, the tag vocabulary: a tag with no members has to
+  keep existing, or the filter set on it can't be cleared. Its *count* is
+  still derived. See `docs/decisions/0008`.
 - The JSON file is the truth. It is what makes the widget and boot-time
   reminders possible without the WebView.
 - Nothing leaves the device unless you ask.

@@ -102,3 +102,23 @@ together, and `docs/bridge.md` for the contract between the two halves.
 - **The reminder cap and the default wording are Kotlin's alone.**
   `notifyState()` had been sending both across the bridge all along and the page
   ignored them in favour of its own copies.
+- **The tag vocabulary is stored, and a tag at 0 stays put.** `allTags()` counted
+  membership, so a tag whose last spell was retagged or buried stopped existing —
+  while the sticky filters went on filtering by its name. Requiring `inbox` and
+  then emptying the inbox left the pool empty with no row anywhere to clear, and
+  only *Clear all filters*, which discards everything else too, as a way out.
+  Nothing about it was specific to `inbox`; that is just the tag emptying out is
+  the point of. `doc.tags` now holds the vocabulary, `SCHEMA = 3`, and the
+  migration runs at boot to unstick a filter already in that state. The count
+  stays derived — see `docs/decisions/0008`, which is also where the exception to
+  "computed, never stored" is argued.
+- **Computed tags always show in the Filters sheet.** `question`, `untagged` and
+  `useful` are still never stored; they are seeded in at 0 so that `untagged`
+  reaching zero — the good outcome — can't strand a filter set on it either.
+- **Removing a tag became deleting a tag.** It was "Remove from all spells", and
+  the tag then vanished as a side effect of having no members. Now it clears the
+  vocabulary, the spells, the three filter lists and the kind override together,
+  and is the only thing that removes a tag.
+- **`inbox` is protected, like `flagged`.** The app writes it on every new spell,
+  so renaming or deleting it only produced a tag the app immediately recreated
+  under a name nothing referred to.

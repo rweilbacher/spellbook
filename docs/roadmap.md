@@ -13,6 +13,20 @@ before they're built. Anything here that has shipped has moved to
 - **The shelf.** A third disposition alongside active/graveyard — not deleted, just not relevant right now. Spec below.
 - **Desk amounts and history.** Spec below.
 - **A faster way to clear filters in the library.** Today, clearing an active Require/Never/Situation filter means opening the Filters sheet and tapping "Clear all filters" — the tag and graveyard chips next to it (`#clearTag`, `#clearGrave`) already carry their own inline ✕, the filter chip (`#libFilterChip`) doesn't. An ✕ there when a filter is active, or a small clear control beside the sort chip, would match the pattern already on screen.
+- **Saving a filter shouldn't need a Done tap.** The Filters sheet applies on change today only after you tap Done — picking a situation or toggling Require/Never should just take effect live, the way the tag and graveyard chips already do.
+- **Close the spell view when it's moved to the graveyard.** Burying a spell from its own detail sheet currently leaves that sheet open, now showing a buried spell — it should close back out to wherever you were.
+- **Indestructible tags pinned to the top of the filter list.** `inbox`, `flagged` and `useful` — the tags that can't be renamed or removed — should sort to the top of the Situations/Type & marks filter lists, in that order, rather than falling wherever their name or count puts them. (They now always *appear*, at 0 if that's the count — see the changelog. This is the ordering half, still open.)
+- **Slightly bigger quick-action targets.** The useful/flag/desk/note/source/bury row on each card reads as a little cramped to tap reliably; worth sizing up.
+- **Two-tap filtering for situations, brought back.** Situations filtering used to be two taps (pick, then confirm) rather than the current one-tap toggle; worth restoring.
+- **A small ✕ on each tag in the detail sheet**, so a tag can be pulled off a spell without opening the editor. Probably needs the tag chips themselves a little bigger to give the ✕ room to be tappable.
+- **A true detail section**, with more room than the compact detail sheet gives today. The clearest case is importing tweet bookmarks: land the whole tweet intact and readable, then condense it down into the short, usable spell text separately — so the import isn't a choice between keeping the source and having something quick to draw.
+- **The actual spell count per situation, given the current meta-category selection** — not just the hypothetical crossed-out numbers Type & marks already shows, but a plain, always-visible count of what's currently in the pool. Could live alongside the existing hypothetical-count mechanism, or stand alone as an easier-to-see "spells in pool right now" figure.
+
+## Bugs
+
+- **Bold/italic/highlight don't apply.** Selecting text and tapping a formatting button in the editor doesn't format it.
+- **Formatting doesn't show in the library list.** A spell with bold/italic/highlight renders correctly in the editor and detail sheet but not in the book/library list view.
+- **The OS text-selection toolbar covers the formatting toolbar.** Selecting text to format it brings up the system copy/paste interface, which sits on top of the bold/italic/highlight controls and blocks them.
 
 ## Later
 

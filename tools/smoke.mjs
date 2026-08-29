@@ -257,10 +257,16 @@ const spell = (over = {}) => Object.assign({
   source: { origin: 'import', note: null, file: null, line: null, url: null, capturedAt: null }
 }, over);
 
+/* A book at the current schema — nothing left for boot to migrate, which is
+   what "boots without a single write" is asserting. `tags` has to hold every
+   tag the spells and the settings mention (here: stuck, and brass from
+   tagKindOverrides), because syncTagVocabulary() would otherwise correctly
+   find something missing and write. */
 const aBook = (over = {}) => JSON.stringify(Object.assign({
-  version: 2, exportedAt: '2026-08-01T00:00:00.000Z', inboxSeeded: true,
+  version: 3, exportedAt: '2026-08-01T00:00:00.000Z', inboxSeeded: true,
   settings: { notifyTimes: ['07:30'], notifyText: 'Wake up', inboxWeight: 5,
               tagKindOverrides: { brass: 'situation' }, drawCount: 3 },
+  tags: ['brass', 'stuck'],
   spells: [
     spell({ id: 'sp_keep', text: 'A spell with a history.', useful: 4, drawn: 9,
             lastDrawn: '2026-07-01T00:00:00.000Z' }),
@@ -303,7 +309,7 @@ async function withBridge(opts){
   check('a version-1 book runs its migrations',
     await p.evaluate(() => doc.spells[0].tags.includes('inbox') && doc.spells[0].desked === null));
   check('and comes out stamped with the current schema',
-    await p.evaluate(() => doc.version === SCHEMA && SCHEMA === 2));
+    await p.evaluate(() => doc.version === SCHEMA && SCHEMA === 3));
   check('five migrations still cost exactly one write', (await saves()).length === 1,
     `${(await saves()).length} saves`);
   await p.close();
@@ -410,6 +416,103 @@ for (const [label, opts] of [
     await p.evaluate(() => doc.spells.find(s => s.id === 'sp_fresh').tags.includes('inbox')));
   check('a merge leaves settings alone — they belong to this phone',
     await p.evaluate(() => S.notifyText) === 'Wake up');
+  check('a merge learns the tags that arrive on the spells',
+    await p.evaluate(() => doc.tags.includes('inbox')));
+  await p.close();
+}
+
+// -------------------------------------------------- the tag vocabulary
+/* The bug this exists for: the tag list used to be counted from membership,
+   so a tag whose last spell was retagged or buried stopped rendering — while
+   S.require went on filtering by it, leaving an empty pool and no control
+   anywhere to clear it. Emptying a tag is now just a count of 0. */
+{
+  const { p } = await withBridge({
+    mode: 'ok', book: aBook({ version: 2, tags: undefined,
+      settings: { require: ['inbox'], tagKindOverrides: {} },
+      spells: [
+        spell({ id: 'sp_last', text: 'The only spell in the inbox.', tags: ['inbox', 'stuck'] }),
+        spell({ id: 'sp_dead', text: 'Buried, and the only thing wearing rare.',
+                state: 'graveyard', tags: ['rare'] })
+      ] })
+  });
+
+  check('a version-2 book gets a vocabulary built from its spells',
+    await p.evaluate(() => Array.isArray(doc.tags) && doc.tags.includes('stuck')));
+  check('the vocabulary includes tags only buried spells wear',
+    await p.evaluate(() => doc.tags.includes('rare')));
+  check('the vocabulary never holds a computed tag',
+    await p.evaluate(() => !doc.tags.some(t => STRUCTURAL.includes(t))));
+
+  // Empty the inbox the ordinary way — the quick action that strips the tag.
+  await p.evaluate(() => {
+    const s = doc.spells.find(x => x.id === 'sp_last');
+    s.tags = s.tags.filter(t => t !== 'inbox');
+    renderAll();
+  });
+  check('emptying a tag leaves the pool empty — the filter still applies',
+    await p.evaluate(() => pool().length) === 0);
+  check('and the tag is still in the list, at 0',
+    await p.evaluate(() => {
+      const row = allTags().find(([t]) => t === 'inbox');
+      return !!row && row[1] === 0;
+    }));
+
+  await p.click('#filterChip');
+  await p.waitForSelector('.sheet');
+  check('an emptied tag still has a row in the Filters sheet',
+    await p.locator('#fSpecial .factitem[data-t="inbox"]').count() === 1);
+  check('the computed tags are always in the sheet, even at 0',
+    await p.evaluate(() => {
+      const rows = [...document.querySelectorAll('#fSpecial .factitem, #fSitu [data-t]')]
+        .map(el => el.dataset.t);
+      return STRUCTURAL.every(t => rows.includes(t));
+    }));
+  // The whole point: the off-switch is reachable.
+  await p.click('#fSpecial .factitem[data-t="inbox"] [data-mode="require"]');
+  check('and it can be switched off from there',
+    await p.evaluate(() => !S.require.includes('inbox')));
+  check('which puts the pool back', await p.evaluate(() => pool().length) > 0);
+  await p.click('#fDone');
+
+  check('an emptied tag is still offered in the editor',
+    await p.evaluate(() => allTags().map(t => t[0]).includes('inbox')));
+
+  // Deleting is the only thing that removes one, and the app's own tags
+  // aren't deletable at all.
+  check('inbox and flagged have no delete button', await p.evaluate(() => {
+    manageTag('inbox');
+    const none = !document.querySelector('#tgDel');
+    closeSheet();
+    return none;
+  }));
+  check('an ordinary tag deletes out of the vocabulary and off its spells',
+    await p.evaluate(() => {
+      manageTag('stuck');
+      $('#tgDel').click(); $('#tgDel').click();       // armed, then confirmed
+      return !doc.tags.includes('stuck')
+        && !doc.spells.some(s => s.tags.includes('stuck'));
+    }));
+  check('and a boot after it does not bring the tag back',
+    await p.evaluate(() => { syncTagVocabulary(); return !doc.tags.includes('stuck'); }));
+  await p.close();
+}
+
+// ---------------------------------------- the vocabulary crosses a restore
+{
+  const { p } = await withBridge({ mode: 'ok', book: aBook() });
+  await p.evaluate(book => { restoreDoc(book, 'a file'); },
+    aBook({ tags: ['brass', 'empty-on-purpose', 'stuck'],
+            spells: [spell({ id: 'sp_one', text: 'Only this one.' })] }));
+  check('a restored book brings its empty categories with it',
+    await p.evaluate(() => doc.tags.includes('empty-on-purpose')));
+  check('an exported book carries the vocabulary',
+    await p.evaluate(() => {
+      let seen = null;
+      const real = Bridge.export; Bridge.export = (n, data) => { seen = data; return 'D'; };
+      exportBook(); Bridge.export = real;
+      return Array.isArray(JSON.parse(seen).tags);
+    }));
   await p.close();
 }
 

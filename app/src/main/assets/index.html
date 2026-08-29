@@ -103,8 +103,9 @@ const DEFAULTS = { drawCount:1, include:[], require:[], exclude:[], noRepeat:12,
    belt-and-braces for books written before the stamp existed (it sat at 1
    through five migrations).
      1 — everything up to and including the notes field
-     2 — the stamp itself starts moving */
-const SCHEMA = 2;
+     2 — the stamp itself starts moving
+     3 — doc.tags, the stored tag vocabulary */
+const SCHEMA = 3;
 const SITUATIONS = ['spiralling','stuck','avoiding','defending','disconnected','overwhelmed',
   'afraid','self-attacking','in-my-head','flat','rushing','wanting','with-her','among-people','arriving'];
 const INBOX = 'inbox';
@@ -115,7 +116,12 @@ const ACTIVE = 'active';
 const GRAVEYARD = 'graveyard';
 const FORM = ['practice','prompt',FLAGGED,INBOX];
 const STRUCTURAL = ['question','untagged','useful'];   // computed, never stored
-const PROTECTED = [FLAGGED];         // authored tags the tag manager won't rename or remove
+/* Authored tags the tag manager won't rename or delete: the app writes them
+   itself — inbox on every new spell, flagged from the card's quick action —
+   so a book without them is a book the app would immediately recreate them
+   in, under a name nothing else refers to. Computed tags are out of reach
+   already, by never being stored at all. */
+const PROTECTED = [FLAGGED, INBOX];
 
 /* Two kinds of tag, two kinds of filter. Situations (plus 'untagged', the
    unsituated state) describe where you are — pick any that apply, OR'd
@@ -216,11 +222,58 @@ function boot(){
   handleOpenRequest(openRequest());
 }
 
-/* A first run, and the only place the seed is ever used. */
+/* A first run, and the only place the seed is ever used. `tags` is left off
+   deliberately: syncTagVocabulary() fills it from the seed on the way through
+   boot, so there is one place that decides what a vocabulary is made of. */
 function freshBook(){
   return { version:SCHEMA, exportedAt:now(), settings:{...DEFAULTS},
     inboxSeeded:true,          // the seed already carries its own inbox tags
     spells:JSON.parse(JSON.stringify(window.SEED || [])) };
+}
+
+/* =========================================================================
+   The tag vocabulary
+   =========================================================================
+   `doc.tags` is the list of tags this book knows. It is stored, which is the
+   one deliberate exception to "derived properties are never stored" — see
+   docs/decisions/0008. The reason is that the derived version could not
+   express a tag with no members, and a tag with no members is exactly what
+   the filters, the tag manager and the editor all still need to show: the
+   filter state points at names, and a name that stopped rendering could not
+   be switched off. STRUCTURAL never enters it — those are computed. */
+
+function knownTags(){ return Array.isArray(doc.tags) ? doc.tags : []; }
+
+/* The vocabulary is a superset of what is in use: every tag any spell wears
+   (buried ones included — they come back), plus anything the filters or the
+   kind overrides still point at, plus whatever has been created and not since
+   deleted. Idempotent, because deleting a tag clears it out of all four of
+   those places at once, so nothing here can resurrect it. Run as the v3
+   migration and again after any path that can bring tags in. */
+function syncTagVocabulary(){
+  const had = knownTags();
+  const want = new Set(had);
+  for(const s of doc.spells) for(const t of s.tags) want.add(t);
+  for(const t of [...S.include, ...S.require, ...S.exclude,
+                  ...Object.keys(S.tagKindOverrides)]) want.add(t);
+  for(const t of STRUCTURAL) want.delete(t);
+  if(Array.isArray(doc.tags) && want.size === had.length) return false;
+  doc.tags = [...want].sort();
+  return true;
+}
+
+/* Creating a tag. Callers persist — this is only ever part of a larger edit. */
+function learnTag(t){
+  if(!t || STRUCTURAL.includes(t) || knownTags().includes(t)) return false;
+  doc.tags = [...knownTags(), t].sort();
+  return true;
+}
+
+/* Deleting one. The only thing that shrinks the vocabulary. */
+function forgetTag(t){
+  if(!knownTags().includes(t)) return false;
+  doc.tags = knownTags().filter(x => x !== t);
+  return true;
 }
 
 /* Settings from the file, filled in from DEFAULTS and normalised. Shared by
@@ -254,6 +307,15 @@ function runMigrations(){
     if(migrateInboxTag()) dirty = true;
     if(migrateNotesField()) dirty = true;
   }
+  /* v3, and the one migration with no version gate. The others fix a field
+     once; this one states an invariant, and doc.tags is load-bearing enough —
+     every tag list in the app reads it — that a book claiming v3 without a
+     usable one would render an empty vocabulary rather than a repaired book.
+     Its own guard makes it a no-op on every boot after the first. Running it
+     here is also what unsticks a filter left on a tag that had already
+     emptied out before this shipped: the name goes back in the list, and the
+     row to switch it off comes back with it. */
+  if(syncTagVocabulary()) dirty = true;
   if(doc.version !== SCHEMA){ doc.version = SCHEMA; dirty = true; }
   return dirty;
 }
@@ -932,7 +994,7 @@ function renderTags(){
   const all = allTags();
   const tags = tagEditMode ? all.filter(([t]) => !STRUCTURAL.includes(t)) : all;
   $('#tagCount').textContent = tagEditMode
-    ? 'Tap a tag to rename or remove it. Computed tags aren\'t editable, and a couple of others are locked.'
+    ? 'Tap a tag to rename or delete it. Deleting is the only thing that removes one — a tag with no spells left stays put, at 0. Computed tags aren\'t editable, and a couple of others are locked.'
     : all.length + ' tags';
   $('#tagEdit').textContent = tagEditMode ? 'Done' : 'Edit';
   $('#tagEdit').classList.toggle('on', tagEditMode);
@@ -946,7 +1008,9 @@ function renderTags(){
 
 function manageTag(tag){
   const held = doc.spells.filter(s => s.tags.includes(tag));
-  const taken = new Set(doc.spells.flatMap(s => s.tags));
+  // The vocabulary, not membership: a tag sitting at 0 is still taken, and
+  // renaming onto it would be a silent merge of two different categories.
+  const taken = new Set(knownTags());
   const locked = PROTECTED.includes(tag);
   sheet('tag', 'Tag', `
     <p class="spell lg" style="margin:4px 0 6px">${esc(tag)}</p>
@@ -964,7 +1028,7 @@ function manageTag(tag){
     <div class="field"><label>Rename</label>
       <input id="tgName" value="${esc(tag)}" autocomplete="off" spellcheck="false"></div>
     <button class="btn" id="tgSave">Rename</button>
-    <button class="btn danger" id="tgDel">Remove from all spells</button>`}
+    <button class="btn danger" id="tgDel">Delete this tag</button>`}
     <button class="btn ghost" id="tgCancel">${locked?'Close':'Cancel'}</button>
   `);
 
@@ -1002,6 +1066,7 @@ function manageTag(tag){
         s.updatedAt = now();
       }
       if(libTag === tag) libTag = next;
+      doc.tags = knownTags().map(t => t === tag ? next : t).sort();
       S.include = S.include.map(t => t === tag ? next : t);
       S.require = S.require.map(t => t === tag ? next : t);
       S.exclude = S.exclude.map(t => t === tag ? next : t);
@@ -1013,23 +1078,31 @@ function manageTag(tag){
       toast('Renamed to ' + next);
     };
 
+    /* Deleting is now a real delete, and the only way a tag leaves the book:
+       off every spell that wears it, and out of the vocabulary. It has to
+       clear all four places the name can be held — spells, the three filter
+       lists, the kind override — or syncTagVocabulary() would put it back on
+       the next boot from whichever one still pointed at it. */
     let armed = false;
     $('#tgDel').onclick = () => {
       if(!armed){
         armed = true;
-        $('#tgDel').textContent = `Tap again to remove from ${held.length}`;
+        $('#tgDel').textContent = held.length
+          ? `Tap again to delete, and remove from ${held.length}`
+          : 'Tap again to delete';
         setTimeout(()=>{ armed = false;
-          const b = $('#tgDel'); if(b) b.textContent = 'Remove from all spells'; }, 3500);
+          const b = $('#tgDel'); if(b) b.textContent = 'Delete this tag'; }, 3500);
         return;
       }
       for(const s of held){ s.tags = s.tags.filter(t => t !== tag); s.updatedAt = now(); }
       if(libTag === tag) libTag = null;
+      forgetTag(tag);
       S.include = S.include.filter(t => t !== tag);
       S.require = S.require.filter(t => t !== tag);
       S.exclude = S.exclude.filter(t => t !== tag);
       delete S.tagKindOverrides[tag];
       persist(); closeSheet(); renderAll(); renderTags();
-      toast('Removed ' + tag);
+      toast('Deleted ' + tag);
     };
   }
   $('#tgCancel').onclick = closeSheet;
@@ -1262,6 +1335,10 @@ function editSpell(s, after){
   $('#eSave').onclick = () => {
     const text = $('#eText').value.trim();
     if(!text){ toast('A spell needs words'); return; }
+    /* Typing a tag into the box creates it here rather than in the keydown
+       handler, so a tag typed and then thought better of doesn't outlive a
+       cancelled edit — the vocabulary only ever grows on a save. */
+    for(const t of cur) learnTag(t);
     if(isNew){
       doc.spells.unshift({ id:uid(), text, tags:[...cur].sort(), useful:0, drawn:0, lastDrawn:null,
         state:ACTIVE, desked:null, notes:[], createdAt:now(), updatedAt:now(),
@@ -1321,7 +1398,10 @@ function triage(){
    you buried and never lowers a count: counters take whichever side has seen
    more. Settings are ignored, because they belong to this phone.           */
 function exportBook(){
-  const data = JSON.stringify({version:SCHEMA, exportedAt:now(), settings:S, spells:doc.spells}, null, 2);
+  // tags travels with the book: it is authored content, not a preference, so
+  // a book restored on another phone brings its empty categories with it.
+  const data = JSON.stringify({version:SCHEMA, exportedAt:now(), settings:S,
+    tags:knownTags(), spells:doc.spells}, null, 2);
   const name = 'spellbook-' + now().slice(0,10) + '.json';
   if(Bridge && Bridge.export){
     try{ const where = Bridge.export(name, data); toast('Saved to ' + (where || 'Downloads')); return; }
@@ -1378,6 +1458,9 @@ function restoreDoc(text, label){
     exportedAt: now(),                      // migrations know what to run
     inboxSeeded: book.inboxSeeded === true,
     settings: (book.settings && typeof book.settings === 'object') ? book.settings : {},
+    // A book from before v3 carries no vocabulary; runMigrations() builds one
+    // from its spells, the same way boot does for a book already here.
+    tags: Array.isArray(book.tags) ? book.tags.filter(t => !STRUCTURAL.includes(t)) : undefined,
     spells
   };
   adoptSettings();     // settings come back too — that's F1.4
@@ -1550,6 +1633,11 @@ function mergeSpells(text){
       doc.spells.push(s); byId.set(id, s); added++;
     }
   }
+  // Tags arriving on the spells join the vocabulary; the incoming book's own
+  // empty categories don't. A merge folds spells in — it isn't a hand-over of
+  // someone else's filing system, and their unused tags would show up here as
+  // rows at 0 with nothing behind them.
+  syncTagVocabulary();
   persist(); refreshMedia(); renderAll();
   toast(`${added} new, ${merged} updated`);
 }
