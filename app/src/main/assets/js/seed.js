@@ -8,7 +8,11 @@
    change under it. It deliberately covers every situation tag, all four form
    tags, each computed tag (question / untagged / useful), the three markup
    forms, multi-line and >300-character text, escaping and non-ASCII, all three
-   source origins, both note types, and the graveyard.
+   source origins, both note types, the graveyard and the shelf.
+
+   The two shelved spells are the third pile: not buried, just set down.
+   They exist so the shelf has something in it on a first run and so the
+   smoke test has a fixture for a state that isn't active or graveyard.
 
    `desked` is null on every spell on purpose: a baked timestamp would decay
    into a different state depending on when you installed. The desk starts
@@ -63,4 +67,6 @@ window.SEED = [
   {"id":"sp_4c403639","text":"Just relax about it.","tags":["flat"],"source":{"origin":"obsidian","note":null,"file":null,"line":null,"url":null,"capturedAt":"2026-01-07"},"useful":0,"drawn":3,"lastDrawn":null,"state":"graveyard","desked":null,"notes":[],"createdAt":"2026-01-12T09:00:00+00:00","updatedAt":"2026-02-03T09:00:00+00:00"},
   {"id":"sp_211e75ca","text":"Everything happens for a reason.","tags":["spiralling"],"source":{"origin":"obsidian","note":null,"file":null,"line":null,"url":null,"capturedAt":"2026-01-08"},"useful":0,"drawn":2,"lastDrawn":null,"state":"graveyard","desked":null,"notes":[],"createdAt":"2026-01-12T09:00:00+00:00","updatedAt":"2026-02-03T09:00:00+00:00"},
   {"id":"sp_d697621e","text":"Try harder.","tags":["flagged","self-attacking"],"source":{"origin":"obsidian","note":null,"file":null,"line":null,"url":null,"capturedAt":"2026-01-10"},"useful":0,"drawn":5,"lastDrawn":null,"state":"graveyard","desked":null,"notes":[],"createdAt":"2026-01-12T09:00:00+00:00","updatedAt":"2026-02-03T09:00:00+00:00"},
+  {"id":"sp_1d5c8e40","text":"Sit with the icon until it stops being a picture.","tags":["prompt","arriving"],"source":{"origin":"manual","note":null,"file":null,"line":null,"url":null,"capturedAt":"2026-02-11"},"useful":1,"drawn":4,"lastDrawn":null,"state":"shelved","desked":null,"notes":[],"createdAt":"2026-01-12T09:00:00+00:00","updatedAt":"2026-03-06T09:00:00+00:00"},
+  {"id":"sp_6f0b27c5","text":"Write the letter you will never send.","tags":["prompt","wanting"],"source":{"origin":"import","note":null,"file":null,"line":null,"url":null,"capturedAt":"2026-02-19"},"useful":0,"drawn":1,"lastDrawn":null,"state":"shelved","desked":null,"notes":[{"id":"nt_3f18c0aa","type":"text","text":"Good spell. Wrong year. Putting it down rather than throwing it out.","createdAt":"2026-03-06T10:22:00+00:00"}],"createdAt":"2026-01-12T09:00:00+00:00","updatedAt":"2026-03-06T09:00:00+00:00"},
 ];

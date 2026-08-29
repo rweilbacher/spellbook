@@ -7,7 +7,7 @@ principles the rest of the app is downstream of.
 
 1. **Retrieval is by situation, not subject.** You open the book in a state, not in a topic. The index has to match the way you arrive.
 2. **Derived properties are not tags.** Anything computable from the spell — its length, whether it's a question, its language — is computed when needed, never stored. Stored derivations go stale on the first edit. This is about properties *of a spell*. The list of tags the book knows is authored content and is stored, because a tag with no members is real and the derived version had no way to say so — `decisions/0008`.
-3. **A spell earns its place by being used, not by being written.** Curation happens through the draw and the graveyard, not through a big upfront sort.
+3. **A spell earns its place by being used, not by being written.** Curation happens through the draw, the shelf and the graveyard, not through a big upfront sort.
 4. **Nothing leaves the device unless you ask.** The djinn is the single exception and it's opt-in.
 5. **The file is the truth.** One JSON file, readable by a widget, portable to a rewrite, exportable as backup.
 
@@ -17,7 +17,9 @@ principles the rest of the app is downstream of.
 
 `spiralling` · `stuck` · `avoiding` · `defending` · `disconnected` · `overwhelmed` · `afraid` · `self-attacking` · `in-my-head` · `flat` · `rushing` · `wanting` · `with-her` · `among-people` · `arriving`
 
-**Form — secondary.** `practice` (a procedure, not a line) · `prompt` (wants twenty minutes) · `flagged` (reconsider this — imported wrong, or tried and it didn't help; locked, can't be renamed or removed as a tag) · `inbox` (new, unproven — a `useful` mark strips it; burying just removes the spell from the draw, tag and all, until it's exhumed)
+**Form — secondary.** `practice` (a procedure, not a line) · `prompt` (wants twenty minutes) · `flagged` (reconsider this — imported wrong, or tried and it didn't help; locked, can't be renamed or removed as a tag) · `inbox` (new, unproven — a `useful` mark strips it, and so does shelving; burying just removes the spell from the draw, tag and all, until it's exhumed)
+
+**Three piles, and they are not tags.** `state` — `active` · `shelved` · `graveyard` — is where a spell *is*, as against what it is. Buried says the spell doesn't work. Shelved says it does and this isn't its year: set down, not given up, and out of the draw, the book, the desk and the widget by construction rather than by a filter that could be cleared without noticing. A tag would have given rename and Require/Never for free and taken that guarantee away — `decisions/0009`.
 
 **Computed, never stored.** `question` · `untagged` · `useful`
 

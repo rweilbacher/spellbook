@@ -62,8 +62,8 @@ break this app.
 real spells into it. It is built as a test fixture — it deliberately carries
 every situation tag, all four form tags, every computed tag, the three markup
 forms, multi-line text, a >300-character spell, accented characters, HTML
-metacharacters, all three source origins, both note types and three buried
-spells. Assertions depend on all of that.
+metacharacters, all three source origins, both note types, three buried spells
+and two shelved ones. Assertions depend on all of that.
 
 **Never seed over a book that exists.** `Store.load()` answers with a state —
 `missing` · `ok` · `corrupt` · `unreadable` — and only `missing` may be seeded
@@ -92,7 +92,7 @@ single `persist()` for the whole of boot. Add one to `runMigrations()` and bump
   each, comments carrying real knowledge — `VoiceRecorder.kt` in particular.
 - **No build step.** The reason this project moves at nineteen commits a day.
   The file you edit is the file that runs. Keep it that way.
-- **Performance.** 46 seeded spells, ~150 in a real book. `pool()` running on
+- **Performance.** 48 seeded spells, ~150 in a real book. `pool()` running on
   every render is free. Resist optimising it.
 - **The prose.** The comments and the specs are the most valuable artefacts
   here. Reorganise them; don't rewrite them.

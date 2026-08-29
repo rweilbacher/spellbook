@@ -192,6 +192,9 @@ button.tag:active{border-color:var(--brass-dim)}
 .row .m{display:flex;gap:9px;align-items:center;font-size:11px;color:var(--dim);flex-wrap:wrap}
 .row .m .mt{color:var(--muted)}
 .row.gone .t{color:var(--dim)}
+/* The shelf sits between the book and the graveyard and reads that way:
+   dimmed, but not as far down as buried, because these are coming back. */
+.row.resting .t{color:var(--muted)}
 .hit{color:var(--brass);background:var(--brass-glow);border-radius:2px}
 
 .taggrid{display:flex;flex-wrap:wrap;gap:9px;padding:6px 0 20px}

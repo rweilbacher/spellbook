@@ -250,6 +250,11 @@ internal object Book {
             val pool = ArrayList<Spell>(spells.length())
             for (i in 0 until spells.length()) {
                 val o = spells.optJSONObject(i) ?: continue
+                // Written as "is it active", not "is it buried" — which is
+                // why the shelf needed no change here: a third state was
+                // excluded the day it started existing. Keep the test this way
+                // round. The book has three piles now (active / shelved /
+                // graveyard) and may grow a fourth. See docs/decisions/0009.
                 if (o.optString("state") != "active") continue
                 val text = o.optString("text").trim()
                 if (text.isEmpty()) continue

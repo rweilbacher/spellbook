@@ -5,8 +5,12 @@
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
+/* The three piles. active() is the book — the draw, the library, the desk and
+   every tag count read it, so a spell leaving ACTIVE leaves all of them at
+   once. That is the whole reason the shelf is a state and not a tag. */
 const active = () => doc.spells.filter(s => s.state === ACTIVE);
 const buried = () => doc.spells.filter(s => s.state === GRAVEYARD);
+const shelved = () => doc.spells.filter(s => s.state === SHELVED);
 /* Every attribute this app writes is double-quoted, so ' was already safe —
    but "safe because of a convention held somewhere else" is not a property
    you want in the one function everything untrusted passes through. */

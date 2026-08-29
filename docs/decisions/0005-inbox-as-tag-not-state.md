@@ -1,6 +1,6 @@
 # 5. The inbox is a tag, not a third state
 
-**Status:** accepted · shipped · precedent for the shelf, which is still open
+**Status:** accepted · shipped · the precedent the shelf declined — `0009`
 
 ## Decision
 
@@ -32,8 +32,8 @@ overload than it looks.
 - The retroactive pass over an existing book had to be gated on a doc-level flag
   (`inboxSeeded`) rather than tag presence, because a tag removed by hand must
   not come back on the next boot.
-- **The shelf inherits this argument but not its conclusion.** A shelved spell
-  probably shouldn't be drawn or widgeted at all by default, which a plain tag
-  doesn't give you — it would have to be built into `pool()` and
-  `Book.spellOfTheDay()` directly, the way `state !== 'active'` already is. See
-  `../roadmap.md`.
+- **The shelf inherited this argument and came out the other way.** A shelved
+  spell must not be drawn or widgeted at all, which a plain tag doesn't give
+  you — it would have had to be built into `pool()`, the library, `deskList()`
+  and `Book.spellOfTheDay()` separately. It shipped as the third `state` this
+  decision declined to be. See `0009-the-shelf-is-a-state.md`.

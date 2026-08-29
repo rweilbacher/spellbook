@@ -135,5 +135,12 @@ to ask. Kotlin holds the single definition.
 side** (`tools/smoke.mjs`). The Kotlin twins don't. Changing one half without
 the other is the likeliest way to break this app.
 
+**Not on the register, and worth knowing why.** `s.state` is read on both
+sides, but neither side names the piles it excludes: JS asks `state === ACTIVE`
+and `Book.spellOfTheDay` asks `state != "active"`. That is why the shelf —
+a third value of `state` — reached the widget with no Kotlin change at all.
+Written the other way round, as a test for `graveyard`, it would have shipped a
+widget that draws shelved spells. Phrase any future test the same way.
+
 For #1, #2, #3, #7 and #8 the honest answer is this register plus a comment on
 each side pointing at its twin, rather than machinery to collapse them.

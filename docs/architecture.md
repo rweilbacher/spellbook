@@ -32,7 +32,7 @@ before it was split, so nothing about how the code talks to itself changed.
 2. **`corrupt` or `unreadable` stops here.** `showRecovery()` replaces the app
    with a screen offering the earlier versions and a file restore, and **nothing
    is written**. A book that parsed but holds no spells counts as corrupt:
-   burying moves a spell's `state`, it never removes one, so zero spells cannot
+   burying or shelving moves a spell's `state`, neither removes one, so zero spells cannot
    be reached through the UI.
 3. **`missing` seeds** from `window.SEED` — the only place the seed is used.
 4. **`adoptSettings()`** fills settings in from `DEFAULTS` and normalises them.
@@ -70,7 +70,8 @@ blocked on a provider that may be a cloud mount.
 
 Five `.screen` sections inside `#app`, one visible at a time, plus the nav bar:
 **draw** (the sigil, the cast, the revealed cards), **desk**, **library**
-(the book, search, sort, the graveyard), **tags**, **vault** (everything else).
+(the book, search, sort, and the two other piles — the shelf and the graveyard),
+**tags**, **vault** (everything else).
 Modal work happens in one bottom `.sheet` at a time.
 
 `#recovery` sits outside `#app` and replaces it entirely. That is deliberate:
@@ -94,6 +95,6 @@ doesn't replay, an open source panel stays open, and the badge keeps its kind.
 
 ## Performance
 
-46 seeded spells; a real book is around 150. `pool()` runs on every render and
+48 seeded spells; a real book is around 150. `pool()` runs on every render and
 that is free. The JSON is roughly 100KB and is rewritten on every edit, which
 is exactly why audio never goes in it.

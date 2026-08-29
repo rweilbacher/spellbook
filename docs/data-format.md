@@ -73,8 +73,11 @@ rendering could not be switched off.
 - **`tags`** are authored only. `question`, `untagged` and `useful` are computed
   at render time and must never be stored — `STRUCTURAL` is the list, and both
   import paths strip them on the way in.
-- **`state`** is `active` or `graveyard`. Nothing removes a spell from the book;
-  burying moves it. That is why a book with zero spells is a corruption signal.
+- **`state`** is `active`, `shelved` or `graveyard`. Nothing removes a spell from
+  the book; burying and shelving move it. That is why a book with zero spells is
+  a corruption signal. The shelf is a state rather than a tag so that leaving
+  `active` is the single thing that takes a spell out of the draw, the library,
+  the desk and the widget at once — `decisions/0009`.
 - **`desked`** is a single timestamp or `null`. Desk freshness and decay are
   computed from it, so nothing needs a cleanup job.
 - **`notes`** is a thread of `{id, type, text|file, createdAt}`. `type` is
@@ -107,6 +110,7 @@ from there.
 | 1 | everything up to and including the notes field. The stamp sat here through five migrations, which is why each of them is also guarded by the field it fixes. |
 | 2 | the stamp starts moving. |
 | 3 | `tags`, the stored vocabulary. |
+| 4 | `state` gains a third value, `shelved`. No migration: every spell in an older book is already `active` or `graveyard`, and an empty shelf is what an unshelved book looks like. The stamp moves anyway, because an older build maps an unknown state back to `active` and would quietly empty the shelf. |
 
 **The convention for a new migration**, unchanged, because it works:
 
@@ -138,8 +142,9 @@ no audio. A restored book therefore shows voice notes as *recording lost*. That
 is the deliberate split: the export is the portable book, the backup folder is
 the complete one.
 
-**Restore** replaces the document wholesale, keeping counters, graveyard state
-and settings; it writes a `pre-restore-` copy of the current book first.
+**Restore** replaces the document wholesale, keeping counters, which pile each
+spell is in, and settings; it writes a `pre-restore-` copy of the current book first.
 **Merge** folds spells in without touching your history: counters take
-`Math.max(stored, incoming)`, a buried spell is never resurrected, and settings
-are ignored because they belong to this phone.
+`Math.max(stored, incoming)`, `state` is never overwritten — no file resurrects
+a spell you buried or takes one off your shelf — and settings are ignored
+because they belong to this phone.

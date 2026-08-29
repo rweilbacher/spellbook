@@ -192,9 +192,78 @@ check('multi-line text survives intact', await page.evaluate(() =>
 check('non-ASCII survives intact', await page.evaluate(() =>
   doc.spells.some(s => /[äöüàéâ’—]/.test(s.text))));
 check('graveyard is browsable', await (async () => {
-  return await page.evaluate(() => { libGrave = true; libTag = null; go('library'); return true; });
+  return await page.evaluate(() => { libPile = GRAVEYARD; libTag = null; go('library'); return true; });
 })() && await page.locator('#libList .row.gone').count() > 0);
-await page.evaluate(() => { libGrave = false; go('draw'); });
+await page.evaluate(() => { libPile = null; go('draw'); });
+
+// ------------------------------------------------------------- the shelf
+/* The third pile. Its whole reason to exist is that a shelved spell leaves
+   the book without being buried, so most of what is worth asserting is an
+   absence: gone from the draw, the library, the desk and the counts, and
+   still there when you go looking for it. */
+check('the seed carries shelved spells', await page.evaluate(() => shelved().length > 0));
+check('a shelved spell is in neither the book nor the graveyard', await page.evaluate(() =>
+  active().every(s => s.state !== SHELVED) && buried().every(s => s.state !== SHELVED)));
+check('the shelf is browsable', await (async () => {
+  return await page.evaluate(() => { libPile = SHELVED; libTag = null; go('library'); return true; });
+})() && await page.locator('#libList .row.resting').count() > 0);
+check('the shelf lists exactly what is on it', await page.evaluate(() =>
+  document.querySelectorAll('#libList .row').length === shelved().length));
+await page.evaluate(() => { libPile = null; go('draw'); });
+
+check('shelving takes a spell out of the draw pool', await page.evaluate(() => {
+  const s = active().find(x => !x.tags.includes('inbox'));
+  const before = pool().length;
+  s.state = SHELVED;
+  const after = pool().length;
+  s.state = ACTIVE;                       // put it back; later checks read the book
+  return after === before - 1;
+}));
+/* Through the real quick action, not by hand: the delegated click handler
+   is the thing under test. */
+check('the shelve quick action shelves, and strips the inbox tag', await (async () => {
+  const id = await page.evaluate(() => {
+    const s = active().find(x => x.tags.includes('inbox'));
+    if (!s) return '';
+    document.querySelector('#results').innerHTML = card(s);
+    return s.id;
+  });
+  if (!id) return false;
+  await page.click(`#results .card[data-id="${id}"] [data-act="shelve"]`);
+  return await page.evaluate(id => {
+    const s = doc.spells.find(x => x.id === id);
+    return s.state === SHELVED && !s.tags.includes('inbox');
+  }, id);
+})());
+check('the shelve action puts a shelved spell back in the book', await (async () => {
+  const id = await page.evaluate(() => {
+    const s = shelved()[0];
+    document.querySelector('#results').innerHTML = card(s);
+    return s.id;
+  });
+  const wasOn = await page.locator(`#results .card[data-id="${id}"] [data-act="shelve"].on`).count() === 1;
+  await page.click(`#results .card[data-id="${id}"] [data-act="shelve"]`);
+  const back = await page.evaluate(id => doc.spells.find(x => x.id === id).state === ACTIVE, id);
+  // Leave the book as it was found.
+  await page.evaluate(id => { doc.spells.find(x => x.id === id).state = SHELVED; }, id);
+  return wasOn && back;
+})());
+check('a shelved spell is never on the desk', await page.evaluate(() => {
+  const s = shelved()[0];
+  s.desked = new Date().toISOString();
+  const hidden = !deskList().some(x => x.id === s.id) && !decayList().some(x => x.id === s.id);
+  s.desked = null;
+  return hidden;
+}));
+check('the Vault counts the shelf separately from the graveyard', await (async () => {
+  await page.evaluate(() => go('vault'));
+  const shelfVal = await page.locator('#vShelf .val').innerText();
+  const graveVal = await page.locator('#vGrave .val').innerText();
+  const [sh, g] = await page.evaluate(() => [shelved().length, buried().length]);
+  await page.evaluate(() => go('draw'));
+  return +shelfVal === sh && +graveVal === g && sh > 0 && g > 0;
+})());
+await page.evaluate(() => { document.querySelector('#results').innerHTML = ''; });
 
 // ---------------------------------------------------------- CSS integrity
 // A later @keyframes silently replaces an earlier one of the same name.
@@ -263,14 +332,15 @@ const spell = (over = {}) => Object.assign({
    tagKindOverrides), because syncTagVocabulary() would otherwise correctly
    find something missing and write. */
 const aBook = (over = {}) => JSON.stringify(Object.assign({
-  version: 3, exportedAt: '2026-08-01T00:00:00.000Z', inboxSeeded: true,
+  version: 4, exportedAt: '2026-08-01T00:00:00.000Z', inboxSeeded: true,
   settings: { notifyTimes: ['07:30'], notifyText: 'Wake up', inboxWeight: 5,
               tagKindOverrides: { brass: 'situation' }, drawCount: 3 },
   tags: ['brass', 'stuck'],
   spells: [
     spell({ id: 'sp_keep', text: 'A spell with a history.', useful: 4, drawn: 9,
             lastDrawn: '2026-07-01T00:00:00.000Z' }),
-    spell({ id: 'sp_gone', text: 'A buried spell.', state: 'graveyard', tags: [] })
+    spell({ id: 'sp_gone', text: 'A buried spell.', state: 'graveyard', tags: [] }),
+    spell({ id: 'sp_rest', text: 'A shelved spell.', state: 'shelved', tags: [] })
   ]
 }, over));
 
@@ -289,7 +359,7 @@ async function withBridge(opts){
 {
   const { p, junk, saves } = await withBridge({ mode: 'ok', book: aBook() });
   check('an existing book is not seeded over',
-    await p.evaluate(() => doc.spells.length) === 2);
+    await p.evaluate(() => doc.spells.length) === 3);
   check('its counts survive the boot',
     await p.evaluate(() => doc.spells.find(s => s.id === 'sp_keep').drawn) === 9);
   check('its settings survive the boot',
@@ -309,7 +379,7 @@ async function withBridge(opts){
   check('a version-1 book runs its migrations',
     await p.evaluate(() => doc.spells[0].tags.includes('inbox') && doc.spells[0].desked === null));
   check('and comes out stamped with the current schema',
-    await p.evaluate(() => doc.version === SCHEMA && SCHEMA === 3));
+    await p.evaluate(() => doc.version === SCHEMA && SCHEMA === 4));
   check('five migrations still cost exactly one write', (await saves()).length === 1,
     `${(await saves()).length} saves`);
   await p.close();
@@ -367,6 +437,8 @@ for (const [label, opts] of [
     await p.evaluate(() => doc.spells.find(s => s.id === 'sp_keep').drawn) === 9);
   check('restore brings the graveyard back',
     await p.evaluate(() => doc.spells.find(s => s.id === 'sp_gone').state) === 'graveyard');
+  check('restore brings the shelf back',
+    await p.evaluate(() => doc.spells.find(s => s.id === 'sp_rest').state) === 'shelved');
   check('restore brings the reminder times back — F1.4',
     await p.evaluate(() => JSON.stringify(S.notifyTimes)) === '["07:30"]');
   check('restore brings tagKindOverrides back — F1.4',
@@ -389,7 +461,7 @@ for (const [label, opts] of [
   check('a restore over a live book keeps it as a pre-restore copy first',
     (await p.evaluate(() => window.__fake.pre)).length === 1);
   check('and the pre-restore copy is the book as it was',
-    JSON.parse((await p.evaluate(() => window.__fake.pre))[0]).spells.length === 2);
+    JSON.parse((await p.evaluate(() => window.__fake.pre))[0]).spells.length === 3);
   check('the restored book replaced the old one',
     await p.evaluate(() => doc.spells.length === 1 && doc.spells[0].id === 'sp_new'));
   check('a restore writes once', (await saves()).length === 1);
@@ -403,6 +475,7 @@ for (const [label, opts] of [
     spells: [
       spell({ id: 'sp_keep', text: 'A spell with a history.', useful: 1, drawn: 20 }),
       spell({ id: 'sp_gone', text: 'A buried spell.', state: 'active' }),
+      spell({ id: 'sp_rest', text: 'A shelved spell.', state: 'active' }),
       spell({ id: 'sp_fresh', text: 'Someone else\'s spell.' })
     ]
   }));
@@ -412,6 +485,8 @@ for (const [label, opts] of [
     await p.evaluate(() => doc.spells.find(s => s.id === 'sp_keep').drawn) === 20);
   check('a merge never resurrects a buried spell — F1.3',
     await p.evaluate(() => doc.spells.find(s => s.id === 'sp_gone').state) === 'graveyard');
+  check('and never takes a spell off the shelf either',
+    await p.evaluate(() => doc.spells.find(s => s.id === 'sp_rest').state) === 'shelved');
   check('a merged-in spell arrives in the inbox',
     await p.evaluate(() => doc.spells.find(s => s.id === 'sp_fresh').tags.includes('inbox')));
   check('a merge leaves settings alone — they belong to this phone',

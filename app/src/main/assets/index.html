@@ -104,16 +104,37 @@ const DEFAULTS = { drawCount:1, include:[], require:[], exclude:[], noRepeat:12,
    through five migrations).
      1 — everything up to and including the notes field
      2 — the stamp itself starts moving
-     3 — doc.tags, the stored tag vocabulary */
-const SCHEMA = 3;
+     3 — doc.tags, the stored tag vocabulary
+     4 — state gains a third value, 'shelved'
+   Version 4 carries no migration, and is the second version that doesn't
+   (2 was the first). There is no field to fix: every existing spell is
+   already active or buried, and absence of a shelf is what an unshelved
+   book looks like. The number moves anyway, because an older build reading
+   this file maps any unknown state back to active — it would quietly empty
+   the shelf, and the stamp is the only place that fact can be recorded. */
+const SCHEMA = 4;
 const SITUATIONS = ['spiralling','stuck','avoiding','defending','disconnected','overwhelmed',
   'afraid','self-attacking','in-my-head','flat','rushing','wanting','with-her','among-people','arriving'];
 const INBOX = 'inbox';
 const FLAGGED = 'flagged';           // formerly 'needs-review' — see migrateFlagTag
-/* The two values s.state ever holds. Buried, not burned: a spell moves
-   between these, it is never removed from the book. */
+/* The three values s.state ever holds. Buried, not burned: a spell moves
+   between these, it is never removed from the book.
+
+   GRAVEYARD and SHELVED are both "out of the draw", and the difference is
+   what the move says. Burying is a verdict on the spell — this one doesn't
+   work. Shelving is a verdict on the season: it has something, but not for
+   the life you're in right now. Two piles rather than one, because a spell
+   you set down for a year and a spell you rejected want finding again on
+   very different days, and one graveyard makes you re-judge both.
+
+   Not a tag, unlike flagged and inbox. A shelved spell has to leave the
+   draw, the book, the desk and the widget by construction — a tag would
+   need every one of those to remember to exclude it, and would leave the
+   whole shelf one tag-deletion away from silently coming back. See
+   docs/decisions/0009. */
 const ACTIVE = 'active';
 const GRAVEYARD = 'graveyard';
+const SHELVED = 'shelved';
 const FORM = ['practice','prompt',FLAGGED,INBOX];
 const STRUCTURAL = ['question','untagged','useful'];   // computed, never stored
 /* Authored tags the tag manager won't rename or delete: the app writes them
@@ -569,7 +590,11 @@ function card(s, opt={}){
       <button class="act" data-act="source" aria-label="Source">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
       </button>
-      <button class="act right" data-act="bury" aria-label="Bury">
+      <button class="act right${s.state===SHELVED?' on':''}" data-act="shelve"
+        aria-label="${s.state===SHELVED?'Take off the shelf':'Put on the shelf'}">
+        <svg viewBox="0 0 24 24"><path d="M3 4.5h18v4H3z"/><path d="M4.5 8.5v11h15v-11"/><path d="M10 12.5h4"/></svg>
+      </button>
+      <button class="act" data-act="bury" aria-label="Bury">
         <svg viewBox="0 0 24 24"><path d="M5 21V10a7 7 0 0114 0v11"/><path d="M12 21v-8M9 13h6"/></svg>
       </button>
     </div>
@@ -595,6 +620,21 @@ function sourceHtml(s){
   // but "works everywhere" and "is a description list" are different claims.
   return `<dl>${rows.map(([k,v])=>`<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`
     + `<div class="source-edit"><button class="tag" data-act="edit">edit spell</button></div>`;
+}
+
+/* A card leaving the screen because its spell left the pile the card was
+   sitting in. Shared by bury and shelve: both take a spell out of the book,
+   so neither can leave the card where it was.
+
+   Inside the spell sheet there is nothing behind the card to reveal, so the
+   sheet closes back out to wherever you came from rather than sitting there
+   showing a spell the book no longer holds. Burying from the detail sheet
+   used to do exactly that — the fix belongs here, once, for both moves. */
+function leave(cardEl){
+  if(cardEl.closest('.sheet')){ closeSheet(); renderAll(); return; }
+  cardEl.style.transition = 'opacity .3s, transform .3s';
+  cardEl.style.opacity = 0; cardEl.style.transform = 'scale(.97)';
+  setTimeout(()=>{ cardEl.remove(); refreshQuiet(); }, 300);
 }
 
 /* card interactions (delegated) */
@@ -644,11 +684,31 @@ document.addEventListener('click', e => {
     box.classList.toggle('hide');
     btn.classList.toggle('on');
   }
+  /* The one quick action that undoes itself. Bury doesn't, because a buried
+     card is only ever seen from the graveyard's own list; a shelved card is
+     what the shelf's detail sheet shows you, and "put it back" is the move
+     you go there to make. */
+  if(act === 'shelve'){
+    if(s.state === SHELVED){
+      s.state = ACTIVE; s.updatedAt = now(); persist(); buzz(10);
+      patchCard(s, cardEl);
+      toast('Back in the book');
+      refreshQuiet();
+    } else {
+      // Shelving is deliberate contact with the spell, so it settles the
+      // inbox question the same way useful and flagged do — you have now
+      // looked at it. It comes back off the shelf proven or not on its own
+      // merits, not still queued as unread.
+      const leftInbox = s.tags.includes(INBOX);
+      if(leftInbox) s.tags = s.tags.filter(t => t !== INBOX);
+      s.state = SHELVED; s.updatedAt = now(); persist(); buzz(10);
+      leave(cardEl);
+      toast(leftInbox ? 'Shelved — left the inbox' : 'Shelved');
+    }
+  }
   if(act === 'bury'){
     s.state = GRAVEYARD; s.updatedAt = now(); persist();
-    cardEl.style.transition = 'opacity .3s, transform .3s';
-    cardEl.style.opacity = 0; cardEl.style.transform = 'scale(.97)';
-    setTimeout(()=>{ cardEl.remove(); refreshQuiet(); }, 300);
+    leave(cardEl);
     toast('Sent to the graveyard');
   }
   if(act === 'edit'){ editSpell(s); }
@@ -892,13 +952,28 @@ function openFilters(){
 /* =========================================================================
    Library
    ========================================================================= */
-let libTag = null, libGrave = false;
+/* Which pile the library is showing: the book (null), the graveyard, or the
+   shelf. One variable rather than a flag per pile — they are exclusive by
+   nature, and two booleans could be told to disagree. */
+let libTag = null, libPile = null;
 const SORTS = {recent:'Recent', useful:'Most useful', drawn:'Most drawn'};
+
+/* Everything the library needs to know about a pile that isn't the book:
+   what to list, what to call it, and what an empty one should say. Adding a
+   fourth disposition means adding a row here, not another branch in four
+   places. */
+const PILES = {
+  [GRAVEYARD]: { list: () => buried(), title: 'Graveyard', chip: 'graveyard', rowClass: 'gone',
+    empty: 'The graveyard is empty', emptySub: 'Nothing has been buried yet.' },
+  [SHELVED]: { list: () => shelved(), title: 'The shelf', chip: 'shelf', rowClass: 'resting',
+    empty: 'The shelf is empty', emptySub: 'Nothing has been set aside yet.' }
+};
 
 function renderLibrary(){
   if(!SORTS[S.sort]) S.sort = 'recent';
   const q = ($('#search').value || '').trim().toLowerCase();
-  let list = libGrave ? buried() : active();
+  const pile = PILES[libPile] || null;
+  let list = pile ? pile.list() : active();
   if(libTag) list = list.filter(s => tagsOf(s).includes(libTag));
   list = list.filter(s => matchesFilters(s));
   if(q) list = list.filter(s => s.text.toLowerCase().includes(q) || tagsOf(s).some(t=>t.includes(q)));
@@ -909,28 +984,28 @@ function renderLibrary(){
     return (b.source?.capturedAt||'').localeCompare(a.source?.capturedAt||'');
   });
 
-  $('#libTitle').textContent = libGrave ? 'Graveyard' : libTag ? libTag : 'The book';
+  $('#libTitle').textContent = pile ? pile.title : libTag ? libTag : 'The book';
   $('#libCount').textContent = list.length + (list.length===1?' spell':' spells');
 
   const filtered = S.include.length || S.require.length || S.exclude.length;
   $('#libFilter').innerHTML = `
     ${libTag ? `<button class="chip on" id="clearTag">${esc(libTag)} <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>` : ''}
-    ${libGrave ? `<button class="chip on" id="clearGrave">graveyard <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>` : ''}
+    ${pile ? `<button class="chip on" id="clearPile">${esc(pile.chip)} <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>` : ''}
     <button class="chip${filtered?' on':''}" id="libFilterChip">
       <svg viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4"/></svg>
       ${esc(libFilterLabel())}
     </button>
     <button class="chip" id="sortChip">${SORTS[S.sort]}</button>`;
   const ct = $('#clearTag'); if(ct) ct.onclick = () => { libTag=null; renderLibrary(); };
-  const cg = $('#clearGrave'); if(cg) cg.onclick = () => { libGrave=false; renderLibrary(); };
+  const cp = $('#clearPile'); if(cp) cp.onclick = () => { libPile=null; renderLibrary(); };
   $('#libFilterChip').onclick = openFilters;
   $('#sortChip').onclick = () => {
     const k = Object.keys(SORTS); S.sort = k[(k.indexOf(S.sort)+1)%k.length]; persist(); renderLibrary();
   };
 
   if(!list.length){
-    const title = q ? 'Nothing found' : filtered ? 'Nothing matches your filters' : libGrave ? 'The graveyard is empty' : 'No spells here';
-    const sub = q ? 'Try a different word.' : filtered ? 'Adjust the filters to see more.' : libGrave ? 'Nothing has been buried yet.' : 'Add one from the Vault.';
+    const title = q ? 'Nothing found' : filtered ? 'Nothing matches your filters' : pile ? pile.empty : 'No spells here';
+    const sub = q ? 'Try a different word.' : filtered ? 'Adjust the filters to see more.' : pile ? pile.emptySub : 'Add one from the Vault.';
     $('#libList').innerHTML = `<div class="empty"><b>${title}</b>${sub}</div>`;
     return;
   }
@@ -938,7 +1013,7 @@ function renderLibrary(){
     let t = esc(s.text.replace(/[*=]/g,''));
     if(q){ const i = t.toLowerCase().indexOf(q);
       if(i>=0) t = t.slice(0,i)+'<span class="hit">'+t.slice(i,i+q.length)+'</span>'+t.slice(i+q.length); }
-    return `<button class="row${libGrave?' gone':''}" data-open="${s.id}">
+    return `<button class="row${pile?' '+pile.rowClass:''}" data-open="${s.id}">
       <div class="t">${t}</div>
       <div class="m">
         ${s.useful?`<span class="mt">♥ ${s.useful}</span>`:''}
@@ -953,14 +1028,29 @@ function renderLibrary(){
 function openSpell(s){
   if(!s) return;
   const grave = s.state === GRAVEYARD;
+  const shelf = s.state === SHELVED;
   const noteCount = (s.notes || []).length;
+  /* The shelf row is hidden on a buried spell. Not because moving between
+     the two piles is meaningless, but because the sheet for something you
+     buried should offer one move — back into the book — rather than a menu
+     of sideways ones. */
   sheet('spell', 'Spell', `<div id="sheetCard">${card(s,{delay:undefined})}</div>
     <button class="btn ghost" id="spNotes">${noteCount ? `Notes (${noteCount})` : 'Notes'}</button>
     <button class="btn ghost" id="spEdit">Edit</button>
+    ${grave ? '' : `<button class="btn ghost" id="spShelf">${shelf?'Take off the shelf':'Put on the shelf'}</button>`}
     <button class="btn ${grave?'':'danger'}" id="spGrave">${grave?'Restore to the book':'Move to graveyard'}</button>`);
   $('#sheetCard .card').classList.remove('rise');
   $('#spNotes').onclick = () => { closeSheet(); openNotes(s); };
   $('#spEdit').onclick = () => { closeSheet(); editSpell(s); };
+  if($('#spShelf')) $('#spShelf').onclick = () => {
+    // Shelving from here settles the inbox the same way the card's quick
+    // action does — the two are the same move, reached differently.
+    const leftInbox = !shelf && s.tags.includes(INBOX);
+    if(leftInbox) s.tags = s.tags.filter(t => t !== INBOX);
+    s.state = shelf ? ACTIVE : SHELVED; s.updatedAt = now(); persist();
+    closeSheet(); renderAll();
+    toast(shelf ? 'Back in the book' : (leftInbox ? 'Shelved — left the inbox' : 'Shelved'));
+  };
   $('#spGrave').onclick = () => {
     s.state = grave ? ACTIVE : GRAVEYARD; s.updatedAt = now(); persist();
     closeSheet(); renderAll(); toast(grave ? 'Back in the book' : 'Sent to the graveyard');
@@ -968,7 +1058,16 @@ function openSpell(s){
 }
 
 function openTag(t){
-  libTag = t; libGrave = false; $('#search').value = '';
+  libTag = t; libPile = null; $('#search').value = '';
+  closeSheet(); go('library');
+}
+
+/* The graveyard and the shelf, both entered from the Vault. They are the
+   library showing a different pile rather than screens of their own — the
+   search box, the sort and the row layout are wanted in all three, and
+   were already written once. */
+function openPile(p){
+  libPile = p; libTag = null; $('#search').value = '';
   closeSheet(); go('library');
 }
 
@@ -1114,7 +1213,7 @@ function manageTag(tag){
 function renderVault(){
   const bk = backupInfo();
   const snaps = Store.snapshots();
-  const a = active().length, g = buried().length;
+  const a = active().length, g = buried().length, sh = shelved().length;
   const untagged = active().filter(s => computed(s).includes('untagged')).length;
   const onDesk = deskList().length, decaying = decayList().length;
   $('#vaultBody').innerHTML = `
@@ -1126,6 +1225,11 @@ function renderVault(){
       <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h6"/><path d="M17 15l2.5 2.5L23 14" style="stroke:var(--brass)"/></svg>
       <span class="lab">Triage<span class="s">Walk the book one spell at a time</span></span>
       <span class="val">${a}</span></button>
+
+    <button class="item" id="vShelf">
+      <svg viewBox="0 0 24 24"><path d="M3 4.5h18v4H3z"/><path d="M4.5 8.5v11h15v-11"/><path d="M10 12.5h4"/></svg>
+      <span class="lab">The shelf<span class="s">Set down, not given up</span></span>
+      <span class="val">${sh}</span></button>
 
     <button class="item" id="vGrave">
       <svg viewBox="0 0 24 24"><path d="M5 21V10a7 7 0 0114 0v11"/><path d="M12 21v-8M9 13h6"/></svg>
@@ -1177,7 +1281,7 @@ function renderVault(){
         <span class="lab">Merge in spells<span class="s">Another book's spells, folded into this one. Nothing here is overwritten</span></span></button>
       <button class="item" id="vRestore">
         <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.7L3 8"/><path d="M3 3v5h5"/></svg>
-        <span class="lab">Restore from a file<span class="s">Replaces this book — spells, counts, graveyard and settings</span></span></button>
+        <span class="lab">Restore from a file<span class="s">Replaces this book — spells, counts, shelf, graveyard and settings</span></span></button>
       ${snaps.length ? `<button class="item" id="vSnaps">
         <svg viewBox="0 0 24 24"><path d="M12 8v5l3 2"/><circle cx="12" cy="12" r="9"/></svg>
         <span class="lab">Earlier versions<span class="s">Daily copies the app keeps for itself</span></span>
@@ -1205,7 +1309,8 @@ function renderVault(){
 
   $('#vAdd').onclick = () => editSpell(null);
   $('#vTriage').onclick = triage;
-  $('#vGrave').onclick = () => { libGrave = true; libTag = null; $('#search').value=''; go('library'); };
+  $('#vGrave').onclick = () => openPile(GRAVEYARD);
+  $('#vShelf').onclick = () => openPile(SHELVED);
   $('#vFilters').onclick = openFilters;
   $('#vNotify').onclick = () => openReminders();
   $('#vExport').onclick = exportBook;
@@ -1374,11 +1479,20 @@ function triage(){
       <div class="triage-bar">
         <button class="keep" id="tKeep">Keep</button>
         <button id="tEdit">Edit</button>
+        <button id="tShelf">Shelve</button>
         <button id="tBury">Bury</button>
       </div>
       <div style="text-align:center;font-size:12px;color:var(--dim);padding-top:12px">
         ${i+1} of ${queue.length}</div>`, {keep:true});
     $('#tKeep').onclick = () => { i++; step(); };
+    /* Triage is where "not now" gets said most often — walking the book is
+       exactly when you meet a spell that's fine and simply isn't yours this
+       year. Bury was the only way out of the queue before, which made the
+       walk feel like a judgement you had to pass on every spell. */
+    $('#tShelf').onclick = () => {
+      s.tags = s.tags.filter(t => t !== INBOX);
+      s.state=SHELVED; s.updatedAt=now(); persist(); i++; step();
+    };
     $('#tBury').onclick = () => { s.state=GRAVEYARD; s.updatedAt=now(); persist(); i++; step(); };
     $('#tEdit').onclick = () => { editSpell(s, () => step()); };
   };
@@ -1388,8 +1502,8 @@ function triage(){
 /* ---------- import / export ----------
    Two kinds of import, and the difference is the whole of this section.
 
-   RESTORE replaces this book with the file — spells, counters, graveyard
-   state and settings, all of it. It's how you come back from a book that
+   RESTORE replaces this book with the file — spells, counters, which pile
+   each spell is in, and settings, all of it. It's how you come back from a book that
    was lost or wouldn't open, and it's the only path that can bring a count
    back. The current book is kept beside the snapshots first, so a restore
    started by mistake is itself reversible.
@@ -1431,7 +1545,10 @@ function adoptSpell(raw){
     text: (raw.text || '').trim(),
     tags: tags.slice().sort(),
     useful: raw.useful || 0, drawn: raw.drawn || 0, lastDrawn: raw.lastDrawn || null,
-    state: raw.state === GRAVEYARD ? GRAVEYARD : ACTIVE,
+    // An unknown state falls back to ACTIVE rather than being kept: the
+    // book has exactly three piles, and a spell in a fourth would be
+    // invisible in all of them.
+    state: [GRAVEYARD, SHELVED].includes(raw.state) ? raw.state : ACTIVE,
     desked: raw.desked || null,
     notes: Array.isArray(raw.notes) ? raw.notes : [],
     createdAt: raw.createdAt || now(), updatedAt: raw.updatedAt || now(),
@@ -1478,8 +1595,8 @@ function confirmRestore(text, label){
   try{ count = parseBook(text).spells.length; }catch(e){ toast("That file isn't a spellbook"); return; }
   sheet('restore', 'Restore', `
     <p class="help" style="margin-top:0">This replaces the book you have now with
-      <b>${esc(label)}</b> — ${count} spells, with their counts, their graveyard and
-      the settings saved alongside them.</p>
+      <b>${esc(label)}</b> — ${count} spells, with their counts, their shelf and
+      graveyard, and the settings saved alongside them.</p>
     <p class="help">${Bridge
       ? 'Your current book is kept as an earlier version first, so this is undoable.'
       : 'Preview mode: nothing here is written to a file either way.'}</p>
@@ -1596,7 +1713,8 @@ function importBook(e){
 }
 
 /* Fold another book's spells into this one. Yours is the book that wins:
-   nothing here can bury a spell, resurrect one you buried, or lower a count. */
+   nothing here can move a spell out of your book, bring back one you buried
+   or shelved, or lower a count. */
 function mergeSpells(text){
   let incoming;
   try{ incoming = parseBook(text).spells; }
@@ -1620,8 +1738,10 @@ function mergeSpells(text){
       ex.useful = Math.max(ex.useful || 0, raw.useful || 0);
       ex.drawn = Math.max(ex.drawn || 0, raw.drawn || 0);
       ex.lastDrawn = [ex.lastDrawn, raw.lastDrawn].filter(Boolean).sort().pop() || null;
-      // state is deliberately untouched: burying is a judgement about this
-      // book, and no file gets to overturn it. Restore is the way back.
+      // state is deliberately untouched: which pile a spell is in — the
+      // book, the shelf or the graveyard — is a judgement about this book
+      // and this life, and no file gets to overturn it. Restore is the way
+      // back.
       ex.updatedAt = now();
       merged++;
     } else {
@@ -1656,7 +1776,7 @@ function go(tab){
   document.querySelector('#'+tab).scrollTop = 0;
 }
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
-  if(b.dataset.tab === 'library' && !$('#library').classList.contains('hide')){ libTag=null; libGrave=false; $('#search').value=''; }
+  if(b.dataset.tab === 'library' && !$('#library').classList.contains('hide')){ libTag=null; libPile=null; $('#search').value=''; }
   go(b.dataset.tab);
 });
 
@@ -1723,8 +1843,8 @@ function refreshQuiet(){
 window.appBack = function(){
   if(document.querySelector('.sheet')){ closeSheet(); return true; }
   const lib = $('#library');
-  if(!lib.classList.contains('hide') && (libTag || libGrave || $('#search').value)){
-    libTag = null; libGrave = false; $('#search').value = ''; renderLibrary(); return true;
+  if(!lib.classList.contains('hide') && (libTag || libPile || $('#search').value)){
+    libTag = null; libPile = null; $('#search').value = ''; renderLibrary(); return true;
   }
   if(tagEditMode && !$('#tags').classList.contains('hide')){ tagEditMode = false; renderTags(); return true; }
   const open = [...document.querySelectorAll('.screen')].find(s => !s.classList.contains('hide'));

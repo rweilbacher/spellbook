@@ -122,3 +122,27 @@ together, and `docs/bridge.md` for the contract between the two halves.
 - **`inbox` is protected, like `flagged`.** The app writes it on every new spell,
   so renaming or deleting it only produced a tag the app immediately recreated
   under a name nothing referred to.
+- **The shelf.** A third pile beside the book and the graveyard, for a spell
+  that's real and isn't for the life you're in right now. Set down, not given
+  up. It's a `state`, not a tag: leaving `active` is the one thing that takes a
+  spell out of the draw, the library, the desk and the widget at once, and the
+  widget's Kotlin already skipped anything that isn't `"active"`, so this needed
+  no Kotlin at all. `decisions/0009` is why, and why it came out the other way
+  from `decisions/0005`. `SCHEMA = 4`, with no migration — an unshelved book is
+  already correct.
+  - A shelve quick action on every card, sitting with bury on the right of the
+    row. It toggles: on a shelved spell the icon is lit and tapping it puts the
+    spell back in the book.
+  - **Vault → The shelf**, next to the graveyard, both of them the library
+    showing a different pile. `libGrave` became `libPile`, and what each pile is
+    called and what its empty state says moved into one `PILES` table.
+  - **Shelve** in triage, next to Bury — walking the book is where "not now"
+    gets said most, and bury was the only way out of the queue.
+  - Shelving strips `inbox`, the way marking useful and flagging do. It's
+    deliberate contact with the spell.
+  - A merge can't take a spell off your shelf, exactly as it can't resurrect a
+    buried one. A restore brings the shelf back with everything else.
+- **Fixed: burying or shelving from the detail sheet closes it.** It used to
+  leave the sheet open on a spell that was no longer in the book. Both moves now
+  go through one `leave()`, which knows there's nothing behind a card in a
+  sheet.

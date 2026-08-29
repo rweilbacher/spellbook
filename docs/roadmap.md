@@ -10,13 +10,11 @@ before they're built. Anything here that has shipped has moved to
 - **Exhume.** Occasionally the draw offers something buried, marked as such. Keeps burial from feeling final.
 - **Widget cadence.** Turning more than once a day, and no longer turning on save. Spec below.
 - **Per-screen filters** — draw, book and widget each get their own, replacing the one shared sticky filter. Spec below.
-- **The shelf.** A third disposition alongside active/graveyard — not deleted, just not relevant right now. Spec below.
 - **Desk amounts and history.** Spec below.
-- **A faster way to clear filters in the library.** Today, clearing an active Require/Never/Situation filter means opening the Filters sheet and tapping "Clear all filters" — the tag and graveyard chips next to it (`#clearTag`, `#clearGrave`) already carry their own inline ✕, the filter chip (`#libFilterChip`) doesn't. An ✕ there when a filter is active, or a small clear control beside the sort chip, would match the pattern already on screen.
+- **A faster way to clear filters in the library.** Today, clearing an active Require/Never/Situation filter means opening the Filters sheet and tapping "Clear all filters" — the tag and pile chips next to it (`#clearTag`, `#clearPile`) already carry their own inline ✕, the filter chip (`#libFilterChip`) doesn't. An ✕ there when a filter is active, or a small clear control beside the sort chip, would match the pattern already on screen.
 - **Saving a filter shouldn't need a Done tap.** The Filters sheet applies on change today only after you tap Done — picking a situation or toggling Require/Never should just take effect live, the way the tag and graveyard chips already do.
-- **Close the spell view when it's moved to the graveyard.** Burying a spell from its own detail sheet currently leaves that sheet open, now showing a buried spell — it should close back out to wherever you were.
 - **Indestructible tags pinned to the top of the filter list.** `inbox`, `flagged` and `useful` — the tags that can't be renamed or removed — should sort to the top of the Situations/Type & marks filter lists, in that order, rather than falling wherever their name or count puts them. (They now always *appear*, at 0 if that's the count — see the changelog. This is the ordering half, still open.)
-- **Slightly bigger quick-action targets.** The useful/flag/desk/note/source/bury row on each card reads as a little cramped to tap reliably; worth sizing up.
+- **Slightly bigger quick-action targets.** The useful/flag/desk/note/source/shelve/bury row on each card reads as a little cramped to tap reliably; worth sizing up. Shelving added a seventh icon to it, so this went from worth doing to overdue.
 - **Two-tap filtering for situations, brought back.** Situations filtering used to be two taps (pick, then confirm) rather than the current one-tap toggle; worth restoring.
 - **A small ✕ on each tag in the detail sheet**, so a tag can be pulled off a spell without opening the editor. Probably needs the tag chips themselves a little bigger to give the ✕ room to be tappable.
 - **A true detail section**, with more room than the compact detail sheet gives today. The clearest case is importing tweet bookmarks: land the whole tweet intact and readable, then condense it down into the short, usable spell text separately — so the import isn't a choice between keeping the source and having something quick to draw.
@@ -102,30 +100,12 @@ Open: whether the widget's filter, once it exists, composes with or replaces
 its existing weights (`inboxWeight`/`flaggedWeight`) — those aren't going
 anywhere, this is additive; and what the default is for a book that's never
 set a widget filter (presumably: none, same as today).
-## The shelf
+## The shelf — shipped
 
-A third disposition, next to active and graveyard: not relevant *right now*,
-without the finality of burial. "Something that's not a deletion but a 'not
-relevant at this time of my life.'"
+Built as a third value of `state` rather than as a tag, which is the question
+this spec left open. The argument, and what it cost, is in
+`decisions/0009-the-shelf-is-a-state.md`.
 
-Distinct from both existing mechanisms it could be confused with:
-
-- **Not `flagged`.** Flagged means *reconsider this* — wrong import, tried
-  and it didn't help — and still gets drawn, just down-weighted by
-  `flaggedWeight`. It's a quality signal about the spell itself.
-- **Not the graveyard.** `state:'graveyard'` (the only other value `state`
-  takes today) reads as a stronger, more final move: buried, reversible, but
-  out. Shelving is a life-context signal, not a verdict on the spell.
-
-Open: tag or state. The inbox precedent (see "The inbox — shipped", above)
-argues for a tag — it comes with rename/remove and Require/Never filtering
-for free, the same as `flagged`, and matches how a spell's disposition has
-consistently ended up modelled here. The difference from `flagged`/`inbox` is
-that a shelved spell probably shouldn't be drawn or widgeted at all by
-default, which a plain tag doesn't get you automatically — it would need to
-be built into `pool()` and `Book.spellOfTheDay()` directly (excluded unless
-explicitly filtered back in), the way `state !== 'active'` already is, rather
-than left to Require/Never like an ordinary tag.
 ## Desk amounts and history
 
 Today the desk (`s.desked`, a single timestamp) only tells you what's on it

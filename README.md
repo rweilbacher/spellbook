@@ -54,8 +54,8 @@ in [`docs/data-format.md`](docs/data-format.md).
 A dated copy goes to `files/backups/` the first time you change something each
 day, seven kept, reachable from **Vault → Earlier versions**. **Export the
 book** writes a copy to Downloads; that's the one you'd carry to a new phone,
-and **Restore from a file** is how it comes back — with its counts, its
-graveyard and its settings.
+and **Restore from a file** is how it comes back — with its counts, its shelf
+and graveyard, and its settings.
 
 Voice notes are not in that file. Each one is an `.m4a` in `files/media/`, and
 the note carries only its filename. **The export therefore does not carry your
@@ -80,7 +80,7 @@ story here.
 
 ## A note on the repo contents
 
-The seed baked into the APK is synthetic — 46 generated spells that exist to
+The seed baked into the APK is synthetic — 48 generated spells that exist to
 give a fresh install something to open and the test suite a fixture. **No real
 spells are in this repository**, and none should be pasted into
 `app/src/main/assets/js/seed.js`. Your book lives on the phone.
