@@ -551,7 +551,7 @@ for (const [label, opts] of [
   check('and it can be switched off from there',
     await p.evaluate(() => !S.filters.draw.require.includes('inbox')));
   check('which puts the pool back', await p.evaluate(() => pool('draw').length) > 0);
-  await p.click('#fDone');
+  await p.click('.sheet [data-close]');
 
   check('an emptied tag is still offered in the editor',
     await p.evaluate(() => allTags().map(t => t[0]).includes('inbox')));
@@ -707,7 +707,11 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
   check('the draw chip opens the draw filter',
     /Draw filter/i.test(await p.locator('.sheet').innerText()));
   await p.click('#fSpecial .factitem[data-t="flagged"] [data-mode="require"]');
-  await p.click('#fDone');
+  check('the draw chip updates while the sheet is still open — no Done needed',
+    (await p.locator('#filterChip').innerText()).includes('needs flagged')
+    && await p.locator('.sheet').count() === 1);
+  check('and there is no Done button', await p.locator('#fDone').count() === 0);
+  await p.click('.sheet [data-close]');
   let [d1, b1, w1] = await pools();
   check('requiring a tag in the draw narrows the draw', d1 < d0, `${d0} → ${d1}`);
   check('and leaves the book and the widget alone', b1 === b0 && w1 === w0);
@@ -722,7 +726,9 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
   check('the library chip opens the book filter',
     /Book filter/i.test(await p.locator('.sheet').innerText()));
   await p.click('#fSpecial .factitem[data-t="practice"] [data-mode="never"]');
-  await p.click('#fDone');
+  check('the library redraws behind the open sheet',
+    await p.locator('#libList .row').count() === await p.evaluate(() => pool('book').length));
+  await p.click('.sheet [data-close]');
   [d1, b1, w1] = await pools();
   check('a Never in the book narrows the book', b1 < b0, `${b0} → ${b1}`);
   check('and not the draw or the widget', d1 === (await p.evaluate(() => pool('draw').length)) && w1 === w0
@@ -755,7 +761,9 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
   check('and edits only the widget’s',
     await p.evaluate(() => S.filters.widget.require.join() === 'practice'
       && !filterActive(S.filters.draw) && !filterActive(S.filters.book)));
-  await p.click('#fDone');
+  check('the Vault row updates behind the open sheet',
+    (await p.locator('#vWidgetFilter').innerText()).includes('needs practice'));
+  await p.click('.sheet [data-close]');
   check('the Vault summarises it',
     (await p.locator('#vWidgetFilter').innerText()).includes('needs practice'));
   check('and the draw is still the whole book',

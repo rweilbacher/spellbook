@@ -980,7 +980,6 @@ function openFilters(scope){
     </div>
     <div style="font-size:13px;color:var(--dim);text-align:center;padding:4px 0" id="fCount"></div>
     <button class="btn ghost" id="fClear">Clear all filters</button>
-    <button class="btn" id="fDone">Done</button>
   `, {onClose: () => {}});
 
   /* Once any filter is active, each Type & marks tag shows what the pool
@@ -1003,13 +1002,18 @@ function openFilters(scope){
     updSpecialCounts();
   };
   upd();
+  /* A change takes effect where it is made: the sheet's own counts, and the
+     screens behind it (the chip's summary, the library, the Vault's widget
+     row). There is no Done to remember, and the scrim, the ✕ and Android's
+     back all leave the screens already current. */
+  const live = () => { upd(); renderAll(); };
   $('#fSitu').querySelectorAll('[data-t]').forEach(b => b.onclick = () => {
     const t = b.dataset.t;
     const on = f.include.includes(t);
     f.include = on ? f.include.filter(x=>x!==t) : [...f.include, t];
     persist();
     b.classList.toggle('picked', !on);
-    upd();
+    live();
   });
   $('#fSpecial').querySelectorAll('.factitem').forEach(row => {
     const t = row.dataset.t;
@@ -1026,11 +1030,10 @@ function openFilters(scope){
       const nm = row.querySelector('.nm');
       nm.classList.toggle('required', nowOn);
       nm.classList.toggle('never', nowOff);
-      upd();
+      live();
     });
   });
   $('#fClear').onclick = () => { f.include = []; f.require = []; f.exclude = []; persist(); closeSheet(); renderAll(); };
-  $('#fDone').onclick = () => { closeSheet(); renderAll(); };
 }
 
 /* =========================================================================

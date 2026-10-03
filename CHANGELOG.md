@@ -169,3 +169,7 @@ together, and `docs/bridge.md` for the contract between the two halves.
   - `SCHEMA = 5`. The old shared filter seeds the draw's and the book's, so the
     first launch after the update looks like the last; the widget's starts empty.
     A restore of an older backup is migrated the same way.
+- Filters sheet applies live: picking a situation or setting Require/Never now
+  redraws the chip, the library and the Vault's widget row behind the open
+  sheet, so there is no Done button. Dismissing it any way — ✕, scrim, Android
+  back — leaves the screens current, which the scrim and back never did before.
