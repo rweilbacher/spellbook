@@ -968,14 +968,36 @@ const FILTER_SHEETS = {
 };
 
 function openFilters(scope, then){
-  const f = S.filters[scope];
   const info = FILTER_SHEETS[scope];
-  const tags = allTags();
-  const situ = tags.filter(([t]) => isSituationLike(t));
-  const special = tags.filter(([t]) => !isSituationLike(t));
-  sheet('filters', info.title, `
+  openFilterSheet({
+    f: S.filters[scope], title: info.title, help: info.help + ' Stays put between sessions.',
+    tags: allTags(), isSituation: isSituationLike,
+    poolCount: () => pool(scope).length,
+    countWith: t => requireCountWith(scope, t),
+    changed: () => { persist(); renderAll(); },
+    then
+  });
+}
+
+/* The filter sheet itself, for any book. Your own four scopes come through
+   openFilters() above; someone else's open book in the circle comes through
+   js/circle.js with their tags, their situations and a filter that lives only
+   as long as you're looking. Either way it is one sheet, so the two can't
+   drift into behaving differently.
+     ctx.f            the {include, require, exclude} being edited, in place
+     ctx.tags         [[tag, count]], already sorted
+     ctx.isSituation  which of them OR together
+     ctx.poolCount()  how many spells pass the filter as it stands
+     ctx.countWith(t) how many would, with t also Required
+     ctx.changed()    after every edit — save, redraw, whatever this book needs
+     ctx.then         runs when the sheet closes, however it closes */
+function openFilterSheet(ctx){
+  const f = ctx.f;
+  const situ = ctx.tags.filter(([t]) => ctx.isSituation(t));
+  const special = ctx.tags.filter(([t]) => !ctx.isSituation(t));
+  sheet('filters', ctx.title, `
     <p class="help" style="margin:2px 0 4px">Situations: tap any that apply. Type &amp; marks: set
-    Require or Never. ${info.help} Stays put between sessions.</p>
+    Require or Never. ${ctx.help}</p>
     <span class="eyebrow" style="display:block;margin-top:8px">Situations</span>
     <div class="taggrid" id="fSitu">
       ${situ.map(([t,n])=>{
@@ -1000,7 +1022,7 @@ function openFilters(scope, then){
     </div>
     <div style="font-size:13px;color:var(--dim);text-align:center;padding:4px 0" id="fCount"></div>
     <button class="btn ghost" id="fClear">Clear all filters</button>
-  `, {onClose: then || (() => {})});
+  `, {onClose: ctx.then || (() => {})});
 
   /* Once any filter is active, each Type & marks tag shows what the pool
      would shrink to if it were also Required — the original count crossed
@@ -1011,14 +1033,14 @@ function openFilters(scope, then){
       const t = row.dataset.t, n = row.dataset.n;
       const ct = row.querySelector('.ct');
       if(filtersActive){
-        ct.innerHTML = `<s>${n}</s> ${requireCountWith(scope, t)}`;
+        ct.innerHTML = `<s>${n}</s> ${ctx.countWith(t)}`;
       } else {
         ct.textContent = n;
       }
     });
   };
   const upd = () => {
-    $('#fCount').textContent = pool(scope).length + ' spells in the pool';
+    $('#fCount').textContent = ctx.poolCount() + ' spells in the pool';
     updSpecialCounts();
   };
   upd();
@@ -1026,12 +1048,11 @@ function openFilters(scope, then){
      screens behind it (the chip's summary, the library, the Vault's widget
      row). There is no Done to remember, and the scrim, the ✕ and Android's
      back all leave the screens already current. */
-  const live = () => { upd(); renderAll(); };
+  const live = () => { ctx.changed(); upd(); };
   $('#fSitu').querySelectorAll('[data-t]').forEach(b => b.onclick = () => {
     const t = b.dataset.t;
     const on = f.include.includes(t);
     f.include = on ? f.include.filter(x=>x!==t) : [...f.include, t];
-    persist();
     b.classList.toggle('picked', !on);
     live();
   });
@@ -1043,7 +1064,6 @@ function openFilters(scope, then){
       f.require = f.require.filter(x => x !== t);
       f.exclude = f.exclude.filter(x => x !== t);
       if(!wasOn){ if(mode === 'require') f.require.push(t); else f.exclude.push(t); }
-      persist();
       const nowOn = f.require.includes(t), nowOff = f.exclude.includes(t);
       row.querySelector('[data-mode="require"]').classList.toggle('on', nowOn);
       row.querySelector('[data-mode="never"]').classList.toggle('on', nowOff);
@@ -1053,7 +1073,7 @@ function openFilters(scope, then){
       live();
     });
   });
-  $('#fClear').onclick = () => { f.include = []; f.require = []; f.exclude = []; persist(); closeSheet(); renderAll(); };
+  $('#fClear').onclick = () => { f.include = []; f.require = []; f.exclude = []; ctx.changed(); closeSheet(); };
 }
 
 /* =========================================================================

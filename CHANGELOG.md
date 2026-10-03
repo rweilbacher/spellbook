@@ -205,3 +205,8 @@ together, and `docs/bridge.md` for the contract between the two halves.
 - Being taken from is never missable: a toast and a buzz wherever you are, a
   mark on the Circle tab until you look, and a *Taken from you* list at the top
   of the circle screen for as long as the circle lasts.
+- Someone else's open book is filtered with the same filter sheet as your own —
+  situations, Require and Never, the hypothetical counts — over their tags.
+  `openFilters()` became a thin wrapper around `openFilterSheet()`, which takes
+  the book it filters as a parameter. Their draw and book filters load into it
+  in one tap.

@@ -281,10 +281,15 @@ moment after any save while it's open. The relay holds it in memory, like
 everything else, and forgets it when you close it or leave.
 
 Looking through someone's book is a **sheet over the circle screen**, not the
-library: their spells, a search, their draw and book filters as one-tap
-presets, and their tags as chips — situations OR'd, the rest AND'd, as in your
-own filter sheet. **Take** works as it does on a laid-down card, and the owner
-hears that someone took from their book.
+library: their spells, a search, and **the same filter sheet as your own
+book** — situations to tap, Require and Never per tag, the crossed-out
+hypothetical counts — over *their* tags and situations. It is literally the
+same code: `openFilterSheet()` in `index.html` takes the book it filters as a
+parameter, so the two can't drift apart. Their draw and book filters are
+one-tap presets that load into it as a starting point. The filter lives in
+memory, is remembered between looks at the same book, and never touches your
+own. **Take** works as it does on a laid-down card, and the owner hears that
+someone took from their book.
 
 ### The screen
 

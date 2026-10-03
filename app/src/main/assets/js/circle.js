@@ -52,7 +52,7 @@ const C = {
   laid:new Map(),          // key → spell id: what this phone has laid down
   bookOpen:false,          // whether this phone's book is open to the circle
   books:new Map(),         // member id → their open book, as the relay passed it on
-  browse:null,             // {owner, preset, include, require} while looking through one
+  browse:null,             // {owner, filter, q}: the last book you looked through, and how
   ws:null, retry:0, retryTimer:null, ping:null, awaySince:0, tries:0, heard:0, saveTimer:null,
   view:'all',              // whose laid spells the screen is showing
   seenTakes:new Set(),
@@ -207,7 +207,11 @@ function circleHandle(raw){
   else if(m.t === 'book'){
     if(m.book) C.books.set(m.owner, m.book); else C.books.delete(m.owner);
     if(C.browse && C.browse.owner === m.owner){
-      if(!m.book){ closeSheet(); toast(`${memberName(m.owner)} closed their book`); }
+      if(!m.book){
+        if(['circle-book', 'filters'].includes(openSheetName())) closeSheet();
+        C.browse = null;
+        toast(`${memberName(m.owner)} closed their book`);
+      }
       else renderBookSheet();
     }
     circleRefresh();
@@ -556,10 +560,13 @@ document.addEventListener('click', e => {
 });
 
 /* ---------- someone else's open book ----------
-   A sheet over the circle: their spells, searchable, narrowed by their own
-   draw or book filter, or by their tags — situations OR'd, the rest AND'd,
-   the same two kinds of filter as your own book. Tags are theirs, so
-   'question' and 'untagged' are worked out here against their situations. */
+   A sheet over the circle: their spells, searchable, and filtered with the
+   very same filter sheet as your own book — openFilterSheet() in index.html —
+   over their tags and their situations. Their draw and book filters are one
+   tap away, loaded as a starting point you can then change. The filter lives
+   in memory for this circle only, and is remembered between looks at the same
+   book. Tags are theirs, so 'question' and 'untagged' are worked out here
+   against their situations. */
 
 function foreignTags(s, book){
   const out = [...s.tags];
@@ -567,65 +574,87 @@ function foreignTags(s, book){
   if(!s.tags.some(t => book.situations.includes(t))) out.push('untagged');
   return out;
 }
-function foreignMatch(tags, f){
+function foreignMatch(tags, f, extraRequire){
+  const req = extraRequire && !f.require.includes(extraRequire) ? [...f.require, extraRequire] : f.require;
   if(f.include.length && !f.include.some(x => tags.includes(x))) return false;
-  if(f.require.length && !f.require.every(x => tags.includes(x))) return false;
+  if(req.length && !req.every(x => tags.includes(x))) return false;
   if(f.exclude.length && f.exclude.some(x => tags.includes(x))) return false;
   return true;
 }
-function browseFilter(book){
-  const b = C.browse, p = (b.preset && book.filters[b.preset]) || newFilter();
-  return { include:[...new Set([...p.include, ...b.include])],
-    require:[...new Set([...p.require, ...b.require])], exclude:p.exclude };
+function foreignPool(book, f, extraRequire){
+  return book.spells.filter(s => foreignMatch(foreignTags(s, book), f, extraRequire));
 }
+/* Their vocabulary with live counts, the way allTags() gives yours: every tag
+   they know, at 0 if nothing wears it, plus the two computed ones. */
+function foreignTagCounts(book){
+  const c = new Map();
+  for(const t of [...book.tags, 'question', 'untagged']) c.set(t, 0);
+  for(const s of book.spells) for(const t of foreignTags(s, book)) c.set(t, (c.get(t) || 0) + 1);
+  return [...c.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+const sameFilter = (a, b) => ['include', 'require', 'exclude'].every(k =>
+  [...a[k]].sort().join('\n') === [...b[k]].sort().join('\n'));
+const copyFilter = f => ({ include:[...f.include], require:[...f.require], exclude:[...f.exclude] });
 
 function openBookSheet(owner){
   if(!C.books.has(owner)) return;
-  C.browse = { owner, preset:null, include:[], require:[] };
+  if(!C.browse || C.browse.owner !== owner) C.browse = { owner, filter:newFilter(), q:'' };
   sheet('circle-book', `${memberName(owner)}’s book`, `
     <input id="cbSearch" placeholder="Search their book" autocomplete="off" spellcheck="false">
-    <div id="cbChips"></div>
-    <div class="count" id="cbCount" style="padding:6px 0 0"></div>
-    <div id="cbList"></div>`, { onClose: () => { C.browse = null; } });
-  $('#cbSearch').oninput = renderBookSheet;
+    <div class="filterbar" id="cbChips"></div>
+    <div class="count" id="cbCount" style="padding:2px 0 0"></div>
+    <div id="cbList"></div>`);
+  $('#cbSearch').value = C.browse.q;
+  $('#cbSearch').oninput = () => { C.browse.q = $('#cbSearch').value; renderBookSheet(); };
   renderBookSheet();
+}
+
+function openBookFilters(){
+  const b = C.browse, book = b && C.books.get(b.owner);
+  if(!book) return;
+  const name = memberName(b.owner);
+  openFilterSheet({
+    f: b.filter, title: `${name}’s tags`,
+    help: `These are ${name}’s tags and situations. It narrows only what you see of their book, and lasts as long as the circle.`,
+    tags: foreignTagCounts(book),
+    isSituation: t => t === 'untagged' || book.situations.includes(t),
+    poolCount: () => foreignPool(book, b.filter).length,
+    countWith: t => foreignPool(book, b.filter, t).length,
+    changed: () => {},
+    // Sheets never stack: the book comes back when the filter closes.
+    then: () => setTimeout(() => { if(C.browse === b && C.books.has(b.owner)) openBookSheet(b.owner); })
+  });
 }
 
 function renderBookSheet(){
   const b = C.browse, book = b && C.books.get(b.owner);
   if(!book || openSheetName() !== 'circle-book') return;
-  const q = ($('#cbSearch').value || '').trim().toLowerCase();
-  const all = book.spells.map(s => ({ s, tags:foreignTags(s, book) }));
-  const count = t => all.filter(x => x.tags.includes(t)).length;
-  const situ = [...book.situations, 'untagged'].map(t => [t, count(t)]).filter(([, n]) => n).sort((a, c) => c[1] - a[1]);
-  const types = [...book.tags.filter(t => !book.situations.includes(t)), 'question'].map(t => [t, count(t)])
-    .filter(([, n]) => n).sort((a, c) => c[1] - a[1]);
+  const q = (b.q || '').trim().toLowerCase();
+  const on = filterActive(b.filter);
   const presets = ['draw', 'book'].filter(k => book.filters[k] && filterActive(book.filters[k]));
-  const f = browseFilter(book);
-  let list = all.filter(x => foreignMatch(x.tags, f));
-  if(q) list = list.filter(x => x.s.text.toLowerCase().includes(q) || x.tags.some(t => t.includes(q)));
+  let list = foreignPool(book, b.filter);
+  if(q) list = list.filter(s => s.text.toLowerCase().includes(q) || foreignTags(s, book).some(t => t.includes(q)));
 
   $('#cbChips').innerHTML = `
-    ${presets.length ? `<div class="filterbar cbrow">${presets.map(k => `<button class="chip${b.preset === k ? ' on' : ''}" data-preset="${k}">
-      <svg viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4"/></svg>Their ${k} filter</button>`).join('')}</div>` : ''}
-    <div class="filterbar cbrow">${situ.map(([t, n]) => `<button class="chip${b.include.includes(t) ? ' on' : ''}" data-inc="${esc(t)}">${esc(t)} <span class="ct">${n}</span></button>`).join('')}</div>
-    ${types.length ? `<div class="filterbar cbrow">${types.map(([t, n]) => `<button class="chip${b.require.includes(t) ? ' on' : ''}" data-req="${esc(t)}">${esc(t)} <span class="ct">${n}</span></button>`).join('')}</div>` : ''}`;
-  $('#cbCount').textContent = `${list.length} of ${all.length} spells`;
-  $('#cbList').innerHTML = list.length ? list.map(({ s }) => {
+    <button class="chip${on ? ' on' : ''}" id="cbFilter">
+      <svg viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4"/></svg>${esc(on ? tagFilterBits(b.filter).join(' · ') : 'Filter')}</button>
+    ${presets.map(k => `<button class="chip${sameFilter(b.filter, book.filters[k]) ? ' on' : ''}" data-preset="${k}">Their ${k} filter</button>`).join('')}`;
+  $('#cbCount').textContent = `${list.length} of ${book.spells.length} spells`;
+  $('#cbList').innerHTML = list.length ? list.map(s => {
     const where = inBook(s.text);
     return `<div class="row brow">
       <div class="t">${esc(s.text.replace(/[*=]/g, ''))}</div>
-      <div class="m"><span>${esc(s.tags.slice(0, 4).join(' · '))}</span>
+      <div class="m"><span>${esc(foreignTags(s, book).slice(0, 4).join(' · '))}</span>
         ${where ? `<span class="mt" style="margin-left:auto">${pileWords(where)}</span>`
                 : `<button class="act take" data-take="${esc(s.id)}" style="margin-left:auto">Take</button>`}</div></div>`;
-  }).join('') : `<div class="empty"><b>Nothing matches</b>Loosen the filter, or try another word.</div>`;
+  }).join('') : `<div class="empty"><b>${q ? 'Nothing found' : 'Nothing matches the filter'}</b>${q ? 'Try a different word.' : 'Adjust the filter to see more.'}</div>`;
 
-  const toggle = (arr, t) => arr.includes(t) ? arr.filter(x => x !== t) : [...arr, t];
+  $('#cbFilter').onclick = openBookFilters;
   $('#cbChips').querySelectorAll('[data-preset]').forEach(x => x.onclick = () => {
-    b.preset = b.preset === x.dataset.preset ? null : x.dataset.preset; renderBookSheet();
+    const p = book.filters[x.dataset.preset];
+    b.filter = sameFilter(b.filter, p) ? newFilter() : copyFilter(p);
+    renderBookSheet();
   });
-  $('#cbChips').querySelectorAll('[data-inc]').forEach(x => x.onclick = () => { b.include = toggle(b.include, x.dataset.inc); renderBookSheet(); });
-  $('#cbChips').querySelectorAll('[data-req]').forEach(x => x.onclick = () => { b.require = toggle(b.require, x.dataset.req); renderBookSheet(); });
   $('#cbList').querySelectorAll('[data-take]').forEach(x => x.onclick = () => {
     const s = book.spells.find(y => y.id === x.dataset.take);
     if(s && takeFromBook(b.owner, s)){ toast('Taken — it’s in your inbox'); renderBookSheet(); }

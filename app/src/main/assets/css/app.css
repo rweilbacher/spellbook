@@ -359,9 +359,6 @@ button.tag:active{border-color:var(--brass-dim)}
   background:linear-gradient(180deg,var(--c),transparent 85%);opacity:.7}
 /* Filter rows inside a sheet scroll with it rather than sticking. */
 .sheet .filterbar{position:static;background:none;padding-top:8px}
-.cbrow{padding-top:6px !important;padding-bottom:0 !important}
-.cbrow .ct{color:var(--dim);margin-left:3px;font-variant-numeric:tabular-nums}
-.chip.on .ct{color:var(--brass-dim)}
 .brow .m{gap:9px}
 /* What's been taken from you, while the circle lasts. */
 .cfeed{background:var(--raise);border:1px solid var(--brass-dim);border-radius:12px;padding:11px 14px 9px;margin:0 0 6px}

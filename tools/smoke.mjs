@@ -1084,6 +1084,31 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
   const narrowed = await B.locator('#cbList .row').count();
   check('circle: a visitor can use the owner’s own draw filter', narrowed > 0 && narrowed < whole, `${whole} → ${narrowed}`);
   await B.click('#cbChips [data-preset="draw"]');
+
+  // Their book, through the very same filter sheet as your own.
+  const ownBefore = await B.evaluate(() => JSON.stringify(S.filters));
+  await B.click('#cbFilter');
+  await B.waitForSelector('.sheet[data-sheet="filters"]');
+  check('circle: their book opens the same filter sheet, over their tags',
+    /Host’s tags/i.test(await B.locator('.sheet .top').innerText())
+      && await B.locator('#fSitu [data-t]').count() > 0 && await B.locator('#fSpecial .factitem').count() > 0);
+  await B.click('#fSitu [data-t="stuck"]');
+  await B.click('#fSpecial .factitem[data-t="question"] [data-mode="never"]');
+  const expect = await B.evaluate(() => foreignPool([...C.books.values()][0], C.browse.filter).length);
+  check('circle: with situations, Never and the pool count working as at home',
+    expect > 0 && expect < whole && (await B.locator('#fCount').innerText()).startsWith(expect + ' '));
+  await B.click('.sheet [data-close]');
+  await B.waitForSelector('.sheet[data-sheet="circle-book"]');
+  check('circle: closing it brings their book back, filtered',
+    await B.locator('#cbList .row').count() === expect
+      && (await B.locator('#cbFilter').innerText()).includes('never question'));
+  check('circle: none of it touches your own filters', await B.evaluate(() => JSON.stringify(S.filters)) === ownBefore);
+  await B.evaluate(() => closeSheet());
+  await B.click('#circle [data-c="browse"]');
+  await B.waitForSelector('#cbList .row');
+  check('circle: the filter is remembered between looks', await B.locator('#cbList .row').count() === expect);
+  await B.evaluate(() => { C.browse.filter = newFilter(); renderBookSheet(); });
+
   await B.fill('#cbSearch', 'only the host has');
   check('circle: and search it', await B.locator('#cbList .row').count() === 1);
   await B.fill('#cbSearch', '');
