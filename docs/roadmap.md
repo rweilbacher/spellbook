@@ -6,8 +6,7 @@ before they're built. Anything here that has shipped has moved to
 
 ## Next
 
-- **Weighted draw**, defaulting to favouring the never-drawn. One switch, reversible. (Related finding: the draw's no-repeat window — `recent`, capped at `S.noRepeat`, default 12 — is a plain in-memory array, not persisted anywhere. It resets to empty on every app reload, so "no repeat in the last 12" only holds within a single session. The widget's version of the same idea doesn't have this gap — it reconstructs the last three weeks deterministically from the day number instead of remembering anything — worth keeping in mind if "the draw feels more random than the widget" keeps coming up: some of that may be this, not the weighting. The less-random idea below is about the draw, not the widget.)
-- **Exhume.** Occasionally the draw offers something buried, marked as such. Keeps burial from feeling final.
+- **Useful weight.** A third dial in the Vault's draw options beside Inbox weight and Flagged weight: `S.usefulWeight`, default 1 (no effect), a multiplier in `weightOf` for spells carrying the `useful` tag. Combines multiplicatively with the other two, same as they do with each other.
 - **Widget cadence.** Turning more than once a day, and no longer turning on save. Spec below.
 - **Per-screen filters** — draw, book and widget each get their own, replacing the one shared sticky filter. Spec below.
 - **Desk amounts and history.** Spec below.
