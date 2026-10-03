@@ -1,6 +1,6 @@
 # 7. The widget derives its pick and never writes
 
-**Status:** accepted · shipped · cadence still open, see `../roadmap.md`
+**Status:** accepted · shipped · cadence still open, see `../roadmap.md` · "Weights yes, filters no" partly superseded by `0010`
 
 ## Decision
 
@@ -26,7 +26,9 @@ shorter history than it actually had, and a reconstruction that disagrees with
 what you saw lets a repeat through. At three weeks, ten years of days against
 the current book produce none.
 
-**Weights yes, filters no.** `inboxWeight` and `flaggedWeight` apply, so the
+**Weights yes, filters no.** *(Since `0010` the widget has a filter of its own,
+set deliberately from the Vault; what is written here still holds for the draw's
+and the book's, which never reach it.)* `inboxWeight` and `flaggedWeight` apply, so the
 home screen honours the same dials as the draw. The sticky filters don't: they
 describe where you are while browsing, and a widget stuck on `spiralling`
 because that's what you last opened the library with would be a bug wearing a

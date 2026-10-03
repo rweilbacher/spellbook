@@ -31,8 +31,11 @@ import java.util.TimeZone
  * which is a no-repeat window that costs nothing to remember.
  *
  * The app's own draw weights apply (inbox over-represented, flagged dialled
- * down); its sticky filters deliberately do not — those are where you are while
- * browsing, not a standing instruction about the home screen.
+ * down). Its draw and book filters deliberately do not — those are where you
+ * are while browsing, not a standing instruction about the home screen. The
+ * widget has a filter of its own (`settings.filters.widget`, edited from the
+ * Vault), which narrows the pool the weights then choose from. See
+ * docs/decisions/0010.
  */
 class SpellWidget : AppWidgetProvider() {
 
@@ -221,6 +224,33 @@ internal object Book {
 
     class Spell(val id: String, val text: String, val tags: List<String>, val weight: Double)
 
+    /**
+     * The widget's own sticky filter — `settings.filters.widget`. Same three
+     * lists, same rule as the page's `matchesFilters`: [include] ORs (the
+     * spell needs at least one), [require] ANDs (it needs all), [exclude]
+     * vetoes (it must have none), and the three combine with AND.
+     */
+    private class Filter(val include: List<String>, val require: List<String>, val exclude: List<String>) {
+        fun matches(tags: List<String>): Boolean {
+            if (include.isNotEmpty() && include.none { tags.contains(it) }) return false
+            if (require.isNotEmpty() && !require.all { tags.contains(it) }) return false
+            if (exclude.isNotEmpty() && exclude.any { tags.contains(it) }) return false
+            return true
+        }
+    }
+
+    /**
+     * The default situations, mirrored from `SITUATIONS` in index.html. Only
+     * `untagged` needs it: a spell is untagged when none of its stored tags is
+     * situation-like, and what is situation-like is this list unless
+     * `tagKindOverrides` says otherwise. Register entry 10 in docs/bridge.md.
+     */
+    private val SITUATIONS = setOf(
+        "spiralling", "stuck", "avoiding", "defending", "disconnected", "overwhelmed",
+        "afraid", "self-attacking", "in-my-head", "flat", "rushing", "wanting",
+        "with-her", "among-people", "arriving"
+    )
+
     /** Days a spell has to sit out before it can come round again. */
     private const val WINDOW = 7
 
@@ -245,6 +275,8 @@ internal object Book {
             val settings = doc.optJSONObject("settings")
             val inboxWeight = weight(settings, "inboxWeight", 3.0)
             val flaggedWeight = weight(settings, "flaggedWeight", 1.0)
+            val filter = widgetFilter(settings)
+            val overrides = settings?.optJSONObject("tagKindOverrides")
 
             val spells = doc.optJSONArray("spells") ?: return null
             val pool = ArrayList<Spell>(spells.length())
@@ -267,6 +299,10 @@ internal object Book {
                         if (t.isNotEmpty()) tags.add(t)
                     }
                 }
+
+                // The filter sees stored and computed tags alike, as the page's
+                // tagsOf() does; the widget's own tag line shows stored ones only.
+                if (!filter.matches(tags + computed(o.optString("text"), tags, o.optDouble("useful", 0.0), overrides))) continue
 
                 var w = 1.0
                 if (tags.contains(INBOX)) w *= inboxWeight
@@ -294,6 +330,58 @@ internal object Book {
         } catch (e: Exception) {
             null
         }
+    }
+
+    /** Filter lists from settings, tolerating anything the file might hold. */
+    private fun names(o: JSONObject?, key: String): List<String> {
+        val a = o?.optJSONArray(key) ?: return emptyList()
+        val out = ArrayList<String>(a.length())
+        for (i in 0 until a.length()) {
+            val t = a.optString(i)
+            if (t.isNotEmpty()) out.add(t)
+        }
+        return out
+    }
+
+    private fun widgetFilter(settings: JSONObject?): Filter {
+        val f = settings?.optJSONObject("filters")?.optJSONObject("widget")
+        return Filter(names(f, "include"), names(f, "require"), names(f, "exclude"))
+    }
+
+    /**
+     * `isSituationLike` in index.html: 'untagged' always is; otherwise the
+     * book's own override for the tag if it has one, otherwise the default list.
+     */
+    private fun isSituationLike(t: String, overrides: JSONObject?): Boolean {
+        if (t == "untagged") return true
+        if (overrides != null && overrides.has(t)) return overrides.optString(t) == "situation"
+        return SITUATIONS.contains(t)
+    }
+
+    /**
+     * `computed()` in index.html — the three tags that are derived from the
+     * spell at the moment they are asked for and never stored, so a filter on
+     * one of them has to derive it here too:
+     *
+     *   question  the text contains a '?'
+     *   untagged  none of its stored tags is situation-like
+     *   useful    its `useful` count is above zero
+     *
+     * Contract vectors, shared with tools/smoke.mjs ("computed(): …"):
+     *   "Ask?",  [stuck],  0 → question
+     *   "Plain.", [],      0 → untagged
+     *   "Plain.", [stuck], 3 → useful
+     *   "Why?",  [],       1 → question, untagged, useful
+     * The text is the raw text, untrimmed, exactly as the page sees it.
+     */
+    private fun computed(
+        rawText: String, stored: List<String>, useful: Double, overrides: JSONObject?
+    ): List<String> {
+        val out = ArrayList<String>(3)
+        if (rawText.contains('?')) out.add("question")
+        if (stored.none { isSituationLike(it, overrides) }) out.add("untagged")
+        if (useful > 0.0) out.add("useful")
+        return out
     }
 
     private fun weight(settings: JSONObject?, key: String, fallback: Double): Double {

@@ -139,12 +139,12 @@ for (const tab of ['desk', 'library', 'tags', 'vault', 'draw']) {
 await page.click('nav button[data-tab="draw"]');
 await page.click('#filterChip');
 await page.waitForSelector('.sheet');
-const before = await page.evaluate(() => pool().length);
+const before = await page.evaluate(() => pool('draw').length);
 await page.click('#fSitu [data-t]');
-const after = await page.evaluate(() => pool().length);
+const after = await page.evaluate(() => pool('draw').length);
 check('picking a situation narrows the pool', after < before, `${before} → ${after}`);
 await page.click('#fClear');
-check('clear restores the pool', await page.evaluate(() => pool().length) === before);
+check('clear restores the pool', await page.evaluate(() => pool('draw').length) === before);
 
 // ---------------------------------------------------------------- search
 await page.click('nav button[data-tab="library"]');
@@ -213,9 +213,9 @@ await page.evaluate(() => { libPile = null; go('draw'); });
 
 check('shelving takes a spell out of the draw pool', await page.evaluate(() => {
   const s = active().find(x => !x.tags.includes('inbox'));
-  const before = pool().length;
+  const before = pool('draw').length;
   s.state = SHELVED;
-  const after = pool().length;
+  const after = pool('draw').length;
   s.state = ACTIVE;                       // put it back; later checks read the book
   return after === before - 1;
 }));
@@ -332,9 +332,12 @@ const spell = (over = {}) => Object.assign({
    tagKindOverrides), because syncTagVocabulary() would otherwise correctly
    find something missing and write. */
 const aBook = (over = {}) => JSON.stringify(Object.assign({
-  version: 4, exportedAt: '2026-08-01T00:00:00.000Z', inboxSeeded: true,
+  version: 5, exportedAt: '2026-08-01T00:00:00.000Z', inboxSeeded: true,
   settings: { notifyTimes: ['07:30'], notifyText: 'Wake up', inboxWeight: 5,
-              tagKindOverrides: { brass: 'situation' }, drawCount: 3 },
+              tagKindOverrides: { brass: 'situation' }, drawCount: 3,
+              filters: { draw: { include: [], require: [], exclude: [] },
+                         book: { include: [], require: [], exclude: [] },
+                         widget: { include: [], require: [], exclude: [] } } },
   tags: ['brass', 'stuck'],
   spells: [
     spell({ id: 'sp_keep', text: 'A spell with a history.', useful: 4, drawn: 9,
@@ -379,7 +382,7 @@ async function withBridge(opts){
   check('a version-1 book runs its migrations',
     await p.evaluate(() => doc.spells[0].tags.includes('inbox') && doc.spells[0].desked === null));
   check('and comes out stamped with the current schema',
-    await p.evaluate(() => doc.version === SCHEMA && SCHEMA === 4));
+    await p.evaluate(() => doc.version === SCHEMA && SCHEMA === 5));
   check('five migrations still cost exactly one write', (await saves()).length === 1,
     `${(await saves()).length} saves`);
   await p.close();
@@ -499,7 +502,7 @@ for (const [label, opts] of [
 // -------------------------------------------------- the tag vocabulary
 /* The bug this exists for: the tag list used to be counted from membership,
    so a tag whose last spell was retagged or buried stopped rendering — while
-   S.require went on filtering by it, leaving an empty pool and no control
+   the filter went on filtering by it, leaving an empty pool and no control
    anywhere to clear it. Emptying a tag is now just a count of 0. */
 {
   const { p } = await withBridge({
@@ -526,7 +529,7 @@ for (const [label, opts] of [
     renderAll();
   });
   check('emptying a tag leaves the pool empty — the filter still applies',
-    await p.evaluate(() => pool().length) === 0);
+    await p.evaluate(() => pool('draw').length) === 0);
   check('and the tag is still in the list, at 0',
     await p.evaluate(() => {
       const row = allTags().find(([t]) => t === 'inbox');
@@ -546,8 +549,8 @@ for (const [label, opts] of [
   // The whole point: the off-switch is reachable.
   await p.click('#fSpecial .factitem[data-t="inbox"] [data-mode="require"]');
   check('and it can be switched off from there',
-    await p.evaluate(() => !S.require.includes('inbox')));
-  check('which puts the pool back', await p.evaluate(() => pool().length) > 0);
+    await p.evaluate(() => !S.filters.draw.require.includes('inbox')));
+  check('which puts the pool back', await p.evaluate(() => pool('draw').length) > 0);
   await p.click('#fDone');
 
   check('an emptied tag is still offered in the editor',
@@ -624,6 +627,215 @@ for (const [label, opts] of [
     (await p.locator('#results .card [data-act="useful"] .n').innerText()).trim() === '5');
   check('a patched card does not replay its entrance',
     await p.locator('#results .card.rise').count() === 0);
+  await p.close();
+}
+
+// ------------------------------------------------- per-screen filters
+/* The draw, the book and the widget each have their own sticky filter
+   (decisions/0010). What has to hold: they start from the old shared one,
+   they never leak into each other, and anything that follows a tag — rename,
+   delete, change of kind — follows it in all three. */
+const filterBook = (filters, over = {}) => aBook(Object.assign({
+  settings: { notifyTimes: ['07:30'], notifyText: 'Wake up', tagKindOverrides: {}, filters },
+  tags: ['flagged', 'practice', 'stuck'],
+  spells: [
+    spell({ id: 'sp_a', text: 'Plain, stuck.', tags: ['stuck'] }),
+    spell({ id: 'sp_b', text: 'Flagged, stuck.', tags: ['flagged', 'stuck'] }),
+    spell({ id: 'sp_c', text: 'Practice?', tags: ['practice'] }),
+    spell({ id: 'sp_d', text: 'Untagged and useful.', tags: [], useful: 2 })
+  ]
+}, over));
+const F = (include = [], require = [], exclude = []) => ({ include, require, exclude });
+
+// A v4 book carries the one shared filter in settings. It becomes the draw's
+// and the book's starting point; the widget's starts empty.
+{
+  const { p, saves } = await withBridge({
+    mode: 'ok', book: filterBook(undefined, { version: 4,
+      settings: { include: ['stuck'], require: ['flagged'], exclude: ['practice'], tagKindOverrides: {} } })
+  });
+  const f = await p.evaluate(() => JSON.stringify(S.filters));
+  const both = JSON.stringify(F(['stuck'], ['flagged'], ['practice']));
+  check('a v4 book’s shared filter becomes the draw’s and the book’s',
+    f === JSON.stringify({ draw: JSON.parse(both), book: JSON.parse(both), widget: F() }), f);
+  check('the widget starts with no filter', await p.evaluate(() => !filterActive(S.filters.widget)));
+  check('the old flat lists are gone from settings',
+    await p.evaluate(() => !('include' in S) && !('require' in S) && !('exclude' in S)));
+  check('and the stamp moves, for one write', await p.evaluate(() => doc.version === 5)
+    && (await saves()).length === 1, `${(await saves()).length} saves`);
+  check('the migrated draw filter still filters',
+    await p.evaluate(() => pool('draw').map(s => s.id).join() === 'sp_b'));
+  await p.close();
+}
+
+// A v5 book that lost its filters — or a v4 build that opened a v5 book and
+// wrote its own empty ones back — is repaired rather than rendered broken.
+{
+  const { p } = await withBridge({
+    mode: 'ok', book: filterBook({ draw: F(['stuck']), widget: 'junk' }, {
+      settings: { tagKindOverrides: {}, include: [], filters: { draw: F(['stuck']), widget: 'junk' } } })
+  });
+  check('a missing or malformed scope is rebuilt empty',
+    await p.evaluate(() => SCOPES.every(sc => Array.isArray(S.filters[sc].include)
+      && Array.isArray(S.filters[sc].require) && Array.isArray(S.filters[sc].exclude))));
+  check('the scopes that were fine are left alone',
+    await p.evaluate(() => S.filters.draw.include.join() === 'stuck'));
+  check('stray flat lists beside S.filters are dropped', await p.evaluate(() => !('include' in S)));
+  await p.close();
+}
+
+// A backup written before the split restores into three filters.
+{
+  const { p } = await withBridge({ mode: 'ok', book: filterBook(F(), {}) });
+  await p.evaluate(book => { restoreDoc(book, 'an old file'); },
+    filterBook(undefined, { version: 4,
+      settings: { include: ['stuck'], require: [], exclude: ['flagged'], tagKindOverrides: {} } }));
+  check('restoring a pre-split backup fills the draw and the book',
+    await p.evaluate(() => S.filters.draw.include.join() === 'stuck'
+      && S.filters.book.exclude.join() === 'flagged' && !filterActive(S.filters.widget)));
+  await p.close();
+}
+
+// The three filters do not leak, driven the way a person would.
+{
+  const { p } = await withBridge({ mode: 'ok', book: filterBook(undefined, {}) });
+  const pools = () => p.evaluate(() => SCOPES.map(sc => pool(sc).length));
+  const [d0, b0, w0] = await pools();
+
+  await p.click('#filterChip');
+  await p.waitForSelector('.sheet');
+  check('the draw chip opens the draw filter',
+    /Draw filter/i.test(await p.locator('.sheet').innerText()));
+  await p.click('#fSpecial .factitem[data-t="flagged"] [data-mode="require"]');
+  await p.click('#fDone');
+  let [d1, b1, w1] = await pools();
+  check('requiring a tag in the draw narrows the draw', d1 < d0, `${d0} → ${d1}`);
+  check('and leaves the book and the widget alone', b1 === b0 && w1 === w0);
+  check('the draw’s summary is on its chip',
+    (await p.locator('#filterChip').innerText()).includes('needs flagged'));
+
+  await p.click('nav button[data-tab="library"]');
+  check('the book does not carry the draw’s filter',
+    await p.locator('#libList .row').count() === b0);
+  await p.click('#libFilterChip');
+  await p.waitForSelector('.sheet');
+  check('the library chip opens the book filter',
+    /Book filter/i.test(await p.locator('.sheet').innerText()));
+  await p.click('#fSpecial .factitem[data-t="practice"] [data-mode="never"]');
+  await p.click('#fDone');
+  [d1, b1, w1] = await pools();
+  check('a Never in the book narrows the book', b1 < b0, `${b0} → ${b1}`);
+  check('and not the draw or the widget', d1 === (await p.evaluate(() => pool('draw').length)) && w1 === w0
+    && await p.evaluate(() => S.filters.draw.exclude.length === 0 && S.filters.widget.exclude.length === 0));
+  check('the library lists what the book filter lets through',
+    await p.locator('#libList .row').count() === b1);
+
+  // A tag is only lit when it is part of the filter of the screen you are on.
+  check('a card’s tag lights for the filter of the screen it is on', await p.evaluate(() => {
+    go('draw');  const onDraw = isActiveFilter('flagged');
+    go('library'); const onBook = isActiveFilter('flagged');
+    go('draw');
+    return onDraw === true && onBook === false;
+  }));
+  await p.close();
+}
+
+// The Vault keeps one Filters entry: the widget's. The draw and the book
+// are edited where they are.
+{
+  const { p } = await withBridge({ mode: 'ok', book: filterBook(undefined, {}) });
+  await p.click('nav button[data-tab="vault"]');
+  check('the shared Filters item is gone from the Vault', await p.locator('#vFilters').count() === 0);
+  check('the Vault has a widget filter', await p.locator('#vWidgetFilter').count() === 1);
+  await p.click('#vWidgetFilter');
+  await p.waitForSelector('.sheet');
+  check('it opens the widget filter',
+    /Widget filter/i.test(await p.locator('.sheet').innerText()));
+  await p.click('#fSpecial .factitem[data-t="practice"] [data-mode="require"]');
+  check('and edits only the widget’s',
+    await p.evaluate(() => S.filters.widget.require.join() === 'practice'
+      && !filterActive(S.filters.draw) && !filterActive(S.filters.book)));
+  await p.click('#fDone');
+  check('the Vault summarises it',
+    (await p.locator('#vWidgetFilter').innerText()).includes('needs practice'));
+  check('and the draw is still the whole book',
+    await p.evaluate(() => pool('draw').length === active().length));
+  await p.close();
+}
+
+// A tag that is renamed, deleted or changes kind is followed in every scope.
+{
+  const { p } = await withBridge({
+    mode: 'ok', book: filterBook({ draw: F(['stuck'], ['flagged'], ['practice']),
+      book: F(['stuck']), widget: F([], ['flagged'], ['practice']) }, {}) });
+  const held = tag => p.evaluate(tag => SCOPES.map(sc => ['include', 'require', 'exclude']
+    .map(k => S.filters[sc][k].includes(tag) ? 1 : 0).join('')).join('/'), tag);
+
+  await p.evaluate(() => { manageTag('practice'); });
+  await p.fill('#tgName', 'rehearse');
+  await p.click('#tgSave');
+  check('practice → rehearse, wherever it was held', await held('rehearse') === '001/000/001'
+    && await held('practice') === '000/000/000', await held('rehearse'));
+
+  await p.evaluate(() => { manageTag('rehearse'); });
+  await p.click('#tgDel'); await p.click('#tgDel');
+  check('deleting it clears every filter that held it',
+    await held('rehearse') === '000/000/000');
+  check('and the vocabulary does not bring it back',
+    await p.evaluate(() => { syncTagVocabulary(); return !doc.tags.includes('rehearse'); }));
+
+  // 'stuck' is a situation (include). Making it a type & mark carries it to
+  // Require in every scope that held it; Never does not apply to a situation.
+  await p.evaluate(() => { manageTag('stuck'); });
+  await p.click('#tgKind [data-kind="special"]');
+  check('changing kind moves it between buckets in every scope',
+    await held('stuck') === '010/010/000', await held('stuck'));
+  await p.close();
+}
+
+// The three computed tags are filterable like any other, in whichever scope.
+// SpellWidget.kt mirrors computed() and the include/require/exclude rule
+// below (register entries 9 and 10, docs/bridge.md): these vectors are the
+// contract, and the Kotlin carries the same ones in its comments.
+{
+  const { p } = await withBridge({ mode: 'ok', book: filterBook(undefined, {}) });
+  check('computed(): question, untagged, useful', await p.evaluate(() => {
+    const c = (text, tags, useful) => computed({ text, tags, useful }).join();
+    return c('Ask?', ['stuck'], 0) === 'question'
+      && c('Plain.', [], 0) === 'untagged'
+      && c('Plain.', ['stuck'], 3) === 'useful'
+      && c('Why?', [], 1) === 'question,untagged,useful';
+  }));
+  check('an override makes a situation-like tag count against untagged', await p.evaluate(() => {
+    S.tagKindOverrides.practice = 'situation';
+    const none = computed({ text: 'x', tags: ['practice'], useful: 0 }).includes('untagged');
+    delete S.tagKindOverrides.practice;
+    const back = computed({ text: 'x', tags: ['practice'], useful: 0 }).includes('untagged');
+    return none === false && back === true;
+  }));
+  check('matchesFilters: include ORs, require ANDs, exclude vetoes, all three combine',
+    await p.evaluate(() => {
+      const sp = tags => ({ text: 'Plain.', tags, useful: 0 });
+      const m = (tags, f) => matchesFilters(sp(tags), Object.assign({ include: [], require: [], exclude: [] }, f));
+      return m(['stuck'], {}) === true
+        && m(['stuck'], { include: ['stuck', 'flat'] }) === true
+        && m(['stuck'], { include: ['flat', 'rushing'] }) === false
+        && m(['flagged'], { require: ['flagged', 'inbox'] }) === false
+        && m(['flagged', 'inbox'], { require: ['flagged', 'inbox'] }) === true
+        && m(['stuck', 'practice'], { exclude: ['practice'] }) === false
+        && m(['stuck', 'flagged'], { include: ['stuck'], require: ['flagged'], exclude: ['practice'] }) === true
+        && m(['stuck'], { include: ['stuck'], require: ['flagged'] }) === false;
+    }));
+  check('a computed tag filters in any scope', await p.evaluate(() => {
+    S.filters.widget.require = ['useful'];
+    S.filters.book.exclude = ['question'];
+    S.filters.draw.include = ['untagged'];
+    const w = pool('widget').map(s => s.id).join(), b = pool('book').map(s => s.id).join(),
+          d = pool('draw').map(s => s.id).join();
+    SCOPES.forEach(sc => S.filters[sc] = { include: [], require: [], exclude: [] });
+    // practice is a type, not a situation, so 'Practice?' is untagged too.
+    return w === 'sp_d' && d.split(',').sort().join() === 'sp_c,sp_d' && !b.includes('sp_c');
+  }));
   await p.close();
 }
 

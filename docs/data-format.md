@@ -87,7 +87,7 @@ rendering could not be switched off.
 
 ## Settings
 
-`drawCount` · `include` / `require` / `exclude` (the sticky filters) ·
+`drawCount` · `filters` (the sticky filters, one per screen — see below) ·
 `noRepeat` · `sort` · `inboxWeight` · `flaggedWeight` · `tagKindOverrides` ·
 `btMic` · `notifyTimes` · `notifyText`.
 
@@ -98,6 +98,19 @@ Kotlin's (`Reminders.DEFAULT_TEXT`, read across the bridge — see
 `adoptSettings()` is the one door in: `Object.assign({}, DEFAULTS, incoming)`,
 then the array and type guards, then `cleanTimes()`. Boot and restore both use
 it, so a file from anywhere gets the same treatment.
+
+### The filters
+
+`settings.filters` holds three independent sticky filters — `draw`, `book`
+(the library) and `widget` — each `{include, require, exclude}`: include ORs,
+require ANDs, exclude vetoes, and the three combine with AND. Tags are names,
+and computed ones (`question`, `untagged`, `useful`) are legal in any of them.
+The widget's is the only one `SpellWidget.kt` reads. `decisions/0010`.
+
+Before v5 there was one shared set at `settings.include` / `require` / `exclude`.
+`migrateFilterScopes()` copies it into `draw` and `book`, leaves `widget` empty,
+and deletes the flat lists. `adoptSettings()` does not default `filters`, since
+its absence is how an older file is recognised.
 
 ## Versioning and migrations
 
@@ -111,6 +124,7 @@ from there.
 | 2 | the stamp starts moving. |
 | 3 | `tags`, the stored vocabulary. |
 | 4 | `state` gains a third value, `shelved`. No migration: every spell in an older book is already `active` or `graveyard`, and an empty shelf is what an unshelved book looks like. The stamp moves anyway, because an older build maps an unknown state back to `active` and would quietly empty the shelf. |
+| 5 | one sticky filter becomes three: `settings.filters` = `{draw, book, widget}`. Migrated by `migrateFilterScopes()`. |
 
 **The convention for a new migration**, unchanged, because it works:
 
@@ -124,9 +138,9 @@ from there.
 - Added to `runMigrations()` under a `version` gate, with `SCHEMA` bumped in the
   same commit.
 
-The five that have shipped: legacy flag tags (`review` / `needs-review` →
+The six that have shipped: legacy flag tags (`review` / `needs-review` →
 `flagged`), the filter schema split, the desk field, the retroactive inbox pass,
-and the notes array.
+the notes array, and the per-screen filters (v5).
 
 `syncTagVocabulary()` is the sixth and the one that breaks the convention: it
 carries no version gate. The other five fix a field once; this one states an

@@ -8,7 +8,6 @@ before they're built. Anything here that has shipped has moved to
 
 - **Useful weight.** A third dial in the Vault's draw options beside Inbox weight and Flagged weight: `S.usefulWeight`, default 1 (no effect), a multiplier in `weightOf` for spells carrying the `useful` tag. Combines multiplicatively with the other two, same as they do with each other.
 - **Widget cadence.** Turning more than once a day, and no longer turning on save. Spec below.
-- **Per-screen filters** — draw, book and widget each get their own, replacing the one shared sticky filter. Spec below.
 - **Desk amounts and history.** Spec below.
 - **A faster way to clear filters in the library.** Today, clearing an active Require/Never/Situation filter means opening the Filters sheet and tapping "Clear all filters" — the tag and pile chips next to it (`#clearTag`, `#clearPile`) already carry their own inline ✕, the filter chip (`#libFilterChip`) doesn't. An ✕ there when a filter is active, or a small clear control beside the sort chip, would match the pattern already on screen.
 - **Saving a filter shouldn't need a Done tap.** The Filters sheet applies on change today only after you tap Done — picking a situation or toggling Require/Never should just take effect live, the way the tag and graveyard chips already do.
@@ -56,6 +55,9 @@ land on a *different* spell mid-day if the pool it draws from changed (a tag
 edited, a spell buried, a weight tuned). That reads as the widget re-rolling on
 a whim, when what actually moved was the input, not the pick.
 
+Editing the widget's own filter (`decisions/0010`) is now the commonest way to
+move that pool, and it re-rolls the pick on the spot for the same reason.
+
 Two changes are on the table, and they're separable:
 
 1. **Turn more than once a day** — every couple of hours rather than only at
@@ -78,27 +80,14 @@ Open: the period length (a couple of hours is the instinct, not yet a number),
 and which of the two "stop turning on save" approaches to take — they trade a
 slightly stale home screen against keeping the derived-not-stored guarantee
 
-## Per-screen filters
+## Per-screen filters — shipped
 
-Right now there is exactly one sticky filter (`S.include` / `S.require` /
-`S.exclude`), and the draw, the library and Vault → The draw → **Filters** all
-read and write the same one — `openFilters()` is the one sheet, opened from
-three places. The widget doesn't apply it at all (see "Weights yes, filters
-no", above) — deliberately, but that leaves no way to ask for a *narrower*
-home screen without also narrowing the draw and the book.
+Draw, book and widget each have their own sticky filter, in `settings.filters`.
+The draw and the book are edited from their own screens; the Vault keeps one
+Filters entry, for the widget. The widget's filter composes with its weights
+rather than replacing them, and defaults to none. The widget's Kotlin had to
+learn the computed tags to honour it — `decisions/0010`.
 
-**The proposal:** three independent sticky filters instead of one — draw,
-book (library), and widget. Each screen keeps, or gets, its own inline filter
-chip to edit its own filter in place; the Vault's standalone **Filters** item
-goes away for draw and book, since editing in context replaces the reason it
-existed. The widget has no screen of its own to hold a chip, so its filter
-stays configurable from the Vault — the one case where the Vault keeps a
-Filters entry.
-
-Open: whether the widget's filter, once it exists, composes with or replaces
-its existing weights (`inboxWeight`/`flaggedWeight`) — those aren't going
-anywhere, this is additive; and what the default is for a book that's never
-set a widget filter (presumably: none, same as today).
 ## The shelf — shipped
 
 Built as a third value of `state` rather than as a tag, which is the question

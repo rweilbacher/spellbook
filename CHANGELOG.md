@@ -146,3 +146,26 @@ together, and `docs/bridge.md` for the contract between the two halves.
   leave the sheet open on a spell that was no longer in the book. Both moves now
   go through one `leave()`, which knows there's nothing behind a card in a
   sheet.
+- **Per-screen filters.** The one sticky filter the draw, the library and the
+  Vault all shared is now three: **draw**, **book** and **widget**, each its own
+  `{include, require, exclude}` under `settings.filters`. Narrowing the library
+  to review something no longer narrows your next draw, and neither touches the
+  home screen. `decisions/0010` is why, and what it undoes of `0007`.
+  - The draw chip and the library chip each open their own filter, titled for
+    it, with its own pool count and Type & marks counts. The Vault's shared
+    **Filters** item is gone.
+  - **Vault → The widget → Widget filter.** The one Filters entry that stays,
+    because the widget has no screen to hold a chip. Default none, as before. It
+    narrows the pool and the draw weights still choose within it. The home screen
+    will usually land on a different spell the moment it changes — the open
+    *Widget cadence* question, now with a cause you set on purpose.
+  - **The widget understands the computed tags.** `SpellWidget.kt` mirrors
+    `computed()` and `isSituationLike()`, so a widget filter on `question`,
+    `untagged` or `useful` — or on a tag whose kind you've changed — means what
+    it means everywhere else. Two new rows on the duplication register (#9, #10).
+  - A card's brass tags follow the filter of the screen it is on.
+  - Rename, delete and change-of-kind in the tag manager, and the vocabulary
+    sync, follow a tag through all three filters.
+  - `SCHEMA = 5`. The old shared filter seeds the draw's and the book's, so the
+    first launch after the update looks like the last; the widget's starts empty.
+    A restore of an older backup is migrated the same way.

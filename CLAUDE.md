@@ -54,7 +54,7 @@ present; and in a plain `file://` or `http://` preview where `Bridge === null`,
 there is no storage, no recording and no reminders. Anything assuming the bridge
 must be guarded — that is what `canRecord()` and every `if(Bridge)` are for.
 
-**Eight things are implemented twice** across the language boundary. See
+**Ten things are implemented twice** across the language boundary. See
 `docs/bridge.md`. Changing one side without the other is the likeliest way to
 break this app.
 

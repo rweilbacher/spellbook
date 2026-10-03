@@ -110,7 +110,7 @@ sends it through `MainActivity.emit()`. Every payload has a `kind`.
 
 ## The duplication register
 
-Eight things exist on both sides of the boundary with nothing keeping them in
+Ten things exist on both sides of the boundary with nothing keeping them in
 step. This is not a bug list — it is what the next change to either side has to
 know it must mirror.
 
@@ -124,6 +124,8 @@ know it must mirror.
 | 6 | Default reminder text | ~~`DEFAULTS.notifyText`~~ → `notifyLimits().defaultText` | `Reminders.DEFAULT_TEXT` | **Collapsed** |
 | 7 | Colour palette | `:root` — `css/app.css` | `res/values/colors.xml` | No |
 | 8 | Media filename shape | trusted implicitly | `VoiceRecorder.SAFE` | No — Kotlin's is the security boundary |
+| 9 | The filter rule (include ORs, require ANDs, exclude vetoes) and the computed tags `question` / `untagged` / `useful` | `matchesFilters` / `computed` — `index.html` | `Book.Filter.matches` / `Book.computed` | No — Kotlin must see the same tags the page does, or a widget filter on `useful` is ignored |
+| 10 | The default situation list, and `tagKindOverrides` deciding what counts as situation-like | `SITUATIONS` / `isSituationLike` — `index.html` | `Book.SITUATIONS` / `Book.isSituationLike` | No — it is what `untagged` is made of |
 
 **#5 and #6 are done.** `notifyState()` had been sending both values across all
 along and the page ignored them in favour of its own constants — which is
@@ -131,8 +133,8 @@ exactly how two constants drift apart. `js/reminders.js` now reads what it is
 told, once, with fallbacks that only apply in preview where there is no bridge
 to ask. Kotlin holds the single definition.
 
-**Three of the rest — `fmt`, `cleanTimes`, `weightOf` — have tests on the JS
-side** (`tools/smoke.mjs`). The Kotlin twins don't. Changing one half without
+**Five of the rest — `fmt`, `cleanTimes`, `weightOf`, `computed` and
+`matchesFilters` — have tests on the JS side** (`tools/smoke.mjs`). The Kotlin twins don't. Changing one half without
 the other is the likeliest way to break this app.
 
 **Not on the register, and worth knowing why.** `s.state` is read on both

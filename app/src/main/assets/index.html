@@ -95,7 +95,7 @@
 /* notifyText is deliberately absent: the default wording is Kotlin's, and
    the page reads it off notifyState() rather than keeping a second copy.
    adoptSettings() fills it in. See notifyLimits() in js/reminders.js. */
-const DEFAULTS = { drawCount:1, include:[], require:[], exclude:[], noRepeat:12, sort:'recent',
+const DEFAULTS = { drawCount:1, noRepeat:12, sort:'recent',
   inboxWeight:3, flaggedWeight:1, tagKindOverrides:{}, btMic:true, notifyTimes:[] };
 /* The shape of the file on disk. Stamped by persist(), read by
    runMigrations() to decide what a book of unknown vintage still needs.
@@ -106,13 +106,19 @@ const DEFAULTS = { drawCount:1, include:[], require:[], exclude:[], noRepeat:12,
      2 — the stamp itself starts moving
      3 — doc.tags, the stored tag vocabulary
      4 — state gains a third value, 'shelved'
+     5 — one sticky filter becomes three: settings.filters = {draw, book, widget}
    Version 4 carries no migration, and is the second version that doesn't
    (2 was the first). There is no field to fix: every existing spell is
    already active or buried, and absence of a shelf is what an unshelved
    book looks like. The number moves anyway, because an older build reading
    this file maps any unknown state back to active — it would quietly empty
-   the shelf, and the stamp is the only place that fact can be recorded. */
-const SCHEMA = 4;
+   the shelf, and the stamp is the only place that fact can be recorded.
+
+   Version 5 does carry one — migrateFilterScopes(). The old include / require /
+   exclude become the starting point of both the draw's and the book's filter,
+   so nothing changes on the first launch; the widget's starts empty, which is
+   what it did before it had one. See docs/decisions/0010. */
+const SCHEMA = 5;
 const SITUATIONS = ['spiralling','stuck','avoiding','defending','disconnected','overwhelmed',
   'afraid','self-attacking','in-my-head','flat','rushing','wanting','with-her','among-people','arriving'];
 const INBOX = 'inbox';
@@ -161,7 +167,31 @@ function isSituationLike(t){
 /* A tag lights up on a card only if it's part of what you've actively
    filtered for right now — not just because it happens to be a situation.
    Keeps 'brass' meaning one thing: this is why the spell is in front of you. */
-function isActiveFilter(t){ return S.include.includes(t) || S.require.includes(t); }
+/* Three sticky filters, one per screen that picks spells: the draw, the book
+   (the library), and the home screen widget. They share a shape and nothing
+   else — a filter set while browsing the book no longer narrows the draw, and
+   neither can reach the widget. See docs/decisions/0010. */
+const SCOPES = ['draw','book','widget'];
+function newFilter(){ return { include:[], require:[], exclude:[] }; }
+function newFilters(){ return { draw:newFilter(), book:newFilter(), widget:newFilter() }; }
+/* Every filter, with its scope. Anything that has to follow a tag across a
+   rename, a delete or a change of kind goes through here, so a fourth scope
+   would be picked up by all of them at once. */
+function eachFilter(fn){ for(const sc of SCOPES) fn(S.filters[sc], sc); }
+function filterActive(f){ return f.include.length > 0 || f.require.length > 0 || f.exclude.length > 0; }
+/* Every tag name any of the three filters holds. */
+function filteredTags(){
+  const out = [];
+  eachFilter(f => out.push(...f.include, ...f.require, ...f.exclude));
+  return out;
+}
+/* Which filter a card on screen answers to: the book's while the library is
+   showing (its detail sheets open over it), the draw's anywhere else. */
+function viewScope(){ return $('#library').classList.contains('hide') ? 'draw' : 'book'; }
+function isActiveFilter(t){
+  const f = S.filters[viewScope()];
+  return f.include.includes(t) || f.require.includes(t);
+}
 
 /* Derived from the text as it is right now, so an edit can't leave them lying. */
 function computed(s){
@@ -247,7 +277,7 @@ function boot(){
    deliberately: syncTagVocabulary() fills it from the seed on the way through
    boot, so there is one place that decides what a vocabulary is made of. */
 function freshBook(){
-  return { version:SCHEMA, exportedAt:now(), settings:{...DEFAULTS},
+  return { version:SCHEMA, exportedAt:now(), settings:{...DEFAULTS, filters:newFilters()},
     inboxSeeded:true,          // the seed already carries its own inbox tags
     spells:JSON.parse(JSON.stringify(window.SEED || [])) };
 }
@@ -275,8 +305,7 @@ function syncTagVocabulary(){
   const had = knownTags();
   const want = new Set(had);
   for(const s of doc.spells) for(const t of s.tags) want.add(t);
-  for(const t of [...S.include, ...S.require, ...S.exclude,
-                  ...Object.keys(S.tagKindOverrides)]) want.add(t);
+  for(const t of [...filteredTags(), ...Object.keys(S.tagKindOverrides)]) want.add(t);
   for(const t of STRUCTURAL) want.delete(t);
   if(Array.isArray(doc.tags) && want.size === had.length) return false;
   doc.tags = [...want].sort();
@@ -303,9 +332,8 @@ function forgetTag(t){
 function adoptSettings(){
   doc.settings = Object.assign({}, DEFAULTS, doc.settings || {});
   S = doc.settings;
-  if(!Array.isArray(S.include)) S.include = [];
-  if(!Array.isArray(S.require)) S.require = [];
-  if(!Array.isArray(S.exclude)) S.exclude = [];
+  // S.filters is deliberately not defaulted here: its absence is how
+  // migrateFilterScopes() knows the file still carries the one shared filter.
   if(!S.tagKindOverrides || typeof S.tagKindOverrides !== 'object') S.tagKindOverrides = {};
   S.notifyTimes = cleanTimes(S.notifyTimes);
   if(typeof S.notifyText !== 'string' || !S.notifyText) S.notifyText = notifyLimits().defaultText;
@@ -321,6 +349,10 @@ function adoptSettings(){
 function runMigrations(){
   let dirty = false;
   const from = Number(doc.version) || 0;
+  // The pre-v5 migrations below, and migrateFilterScopes() after them, work
+  // on the one shared filter. adoptSettings() no longer defaults it, so give
+  // a file that still carries it (or carries nothing) the three lists to read.
+  if(from < 2 || !S.filters) for(const k of ['include','require','exclude']) if(!Array.isArray(S[k])) S[k] = [];
   if(from < 2){
     if(migrateFlagTag()) dirty = true;
     if(migrateFilterSchema()) dirty = true;
@@ -328,6 +360,14 @@ function runMigrations(){
     if(migrateInboxTag()) dirty = true;
     if(migrateNotesField()) dirty = true;
   }
+  /* v5, and like syncTagVocabulary it carries no version gate. It converts a
+     v4 book once, but it also states an invariant the whole app leans on —
+     S.filters exists, with all three scopes, each holding three arrays — so
+     it is guarded by that, not by the stamp, and it repairs a file that
+     claims v5 without one (a hand-edited file; a v4 build that opened a v5
+     book, wrote its settings back and re-stamped it v4). It has to come
+     before the vocabulary sync, which reads the filters. */
+  if(migrateFilterScopes()) dirty = true;
   /* v3, and the one migration with no version gate. The others fix a field
      once; this one states an invariant, and doc.tags is load-bearing enough —
      every tag list in the app reads it — that a book claiming v3 without a
@@ -364,6 +404,33 @@ function migrateFilterSchema(){
   if(S.exclude.some(isSituationLike)){
     S.exclude = S.exclude.filter(t => !isSituationLike(t));
     changed = true;
+  }
+  return changed;
+}
+
+/* One shared sticky filter becomes three: the draw's, the book's and the
+   widget's. The old one is where the first two start, so the first launch
+   after the update looks exactly like the last one before it. The widget's
+   starts empty — "no filter, same as today" — because it never had one, and
+   inheriting the draw's would narrow a home screen nobody asked to narrow.
+   The flat lists are removed once copied: two sources of truth for the same
+   filter is the bug this migration exists to end. */
+function migrateFilterScopes(){
+  let changed = false;
+  if(!S.filters || typeof S.filters !== 'object'){
+    const old = () => ({ include:[...S.include], require:[...S.require], exclude:[...S.exclude] });
+    S.filters = { draw:old(), book:old(), widget:newFilter() };
+    changed = true;
+  }
+  for(const sc of SCOPES){
+    const f = S.filters[sc];
+    if(!f || typeof f !== 'object'){ S.filters[sc] = newFilter(); changed = true; continue; }
+    for(const k of ['include','require','exclude']){
+      if(!Array.isArray(f[k])){ f[k] = []; changed = true; }
+    }
+  }
+  for(const k of ['include','require','exclude']){
+    if(k in S){ delete S[k]; changed = true; }
   }
   return changed;
 }
@@ -435,27 +502,32 @@ function persist(){
 /* =========================================================================
    Drawing
    ========================================================================= */
-/* The same sticky filters narrow the draw pool and the library list. */
-/* extraRequire: an additional tag to require on top of the active filter,
+/* One filter against one spell. Which filter is the caller's business — each
+   screen has its own (S.filters.draw / .book / .widget), and this knows
+   nothing about any of them.
+   extraRequire: an additional tag to require on top of the active filter,
    used to answer "how many would match if this were also Required?"
    without disturbing the real filter state. */
-function matchesFilters(s, extraRequire){
+function matchesFilters(s, f, extraRequire){
   const t = tagsOf(s);
-  if(S.include.length && !S.include.some(x => t.includes(x))) return false;
-  const req = (extraRequire && !S.require.includes(extraRequire)) ? [...S.require, extraRequire] : S.require;
+  if(f.include.length && !f.include.some(x => t.includes(x))) return false;
+  const req = (extraRequire && !f.require.includes(extraRequire)) ? [...f.require, extraRequire] : f.require;
   if(req.length && !req.every(x => t.includes(x))) return false;
-  if(S.exclude.length && S.exclude.some(x => t.includes(x))) return false;
+  if(f.exclude.length && f.exclude.some(x => t.includes(x))) return false;
   return true;
 }
-function pool(){
-  return active().filter(s => matchesFilters(s));
+/* The active spells one screen's filter lets through. */
+function pool(scope){
+  const f = S.filters[scope];
+  return active().filter(s => matchesFilters(s, f));
 }
 
 /* How many active spells would be left if `t` were added to Require,
-   on top of whatever's already selected. Powers the crossed-out counts
-   in the Type & marks list. */
-function requireCountWith(t){
-  return active().filter(s => matchesFilters(s, t)).length;
+   on top of whatever's already selected in that scope. Powers the
+   crossed-out counts in the Type & marks list. */
+function requireCountWith(scope, t){
+  const f = S.filters[scope];
+  return active().filter(s => matchesFilters(s, f, t)).length;
 }
 
 /* Inbox spells are unproven, so they're over-represented in the draw
@@ -485,7 +557,7 @@ function weightedIndex(bag){
   return bag.length - 1;
 }
 function pick(n){
-  let p = pool();
+  let p = pool('draw');
   if(!p.length) return [];
   const fresh = p.filter(s => !recent.includes(s.id));
   if(fresh.length >= n) p = fresh;
@@ -504,7 +576,7 @@ function cast(){
     w.classList.remove('denied'); void w.offsetWidth; w.classList.add('denied');
     return;
   }
-  const p = pool();
+  const p = pool('draw');
   if(!p.length){
     toast(active().length ? 'Nothing matches those filters' : 'The book is empty');
     return;
@@ -834,48 +906,60 @@ function openNotes(s, keep){
 /* =========================================================================
    Filters
    ========================================================================= */
-function tagFilterBits(){
+function tagFilterBits(f){
   const bits = [];
-  if(S.include.length) bits.push(S.include.join(', '));
-  if(S.require.length) bits.push('needs ' + S.require.join(', '));
-  if(S.exclude.length) bits.push('never ' + S.exclude.join(', '));
+  if(f.include.length) bits.push(f.include.join(', '));
+  if(f.require.length) bits.push('needs ' + f.require.join(', '));
+  if(f.exclude.length) bits.push('never ' + f.exclude.join(', '));
   return bits;
 }
-function filterSummary(){
-  const bits = tagFilterBits();
-  return bits.length ? bits.join(' · ') : 'All ' + pool().length + ' spells';
+function filterSummary(scope){
+  const bits = tagFilterBits(S.filters[scope]);
+  return bits.length ? bits.join(' · ') : 'All ' + pool(scope).length + ' spells';
 }
 function libFilterLabel(){
-  const bits = tagFilterBits();
+  const bits = tagFilterBits(S.filters.book);
   return bits.length ? bits.join(' · ') : 'Filter';
 }
 function renderFilterBar(){
-  const n = pool().length;
   $('#filterbar').innerHTML = `
-    <button class="chip${(S.include.length||S.require.length||S.exclude.length)?' on':''}" id="filterChip">
+    <button class="chip${filterActive(S.filters.draw)?' on':''}" id="filterChip">
       <svg viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4"/></svg>
-      ${esc(filterSummary())}
+      ${esc(filterSummary('draw'))}
     </button>
     <div class="seg" style="margin-left:auto">
       ${[1,2,3].map(n=>`<button data-n="${n}" class="${S.drawCount===n?'on':''}">${n}</button>`).join('')}
     </div>`;
-  $('#filterChip').onclick = openFilters;
+  $('#filterChip').onclick = () => openFilters('draw');
   $('#filterbar').querySelectorAll('[data-n]').forEach(b => b.onclick = () => {
     S.drawCount = +b.dataset.n; persist(); renderFilterBar();
   });
 }
 
-function openFilters(){
+/* What each screen's filter sheet calls itself and says it narrows. The same
+   sheet serves all three; only the scope it edits, and the words, differ. */
+const FILTER_SHEETS = {
+  draw:   { title:'Draw filter',
+            help:'Narrows the draw only — the book and the widget keep their own.' },
+  book:   { title:'Book filter',
+            help:'Narrows the book only — the draw and the widget keep their own.' },
+  widget: { title:'Widget filter',
+            help:'Narrows the home screen widget only — the draw and the book keep their own. The widget shows one spell a day, from whatever matches.' }
+};
+
+function openFilters(scope){
+  const f = S.filters[scope];
+  const info = FILTER_SHEETS[scope];
   const tags = allTags();
   const situ = tags.filter(([t]) => isSituationLike(t));
   const special = tags.filter(([t]) => !isSituationLike(t));
-  sheet('filters', 'Filters', `
+  sheet('filters', info.title, `
     <p class="help" style="margin:2px 0 4px">Situations: tap any that apply. Type &amp; marks: set
-    Require or Never. Narrows the draw and the library both, and stays put between sessions.</p>
+    Require or Never. ${info.help} Stays put between sessions.</p>
     <span class="eyebrow" style="display:block;margin-top:8px">Situations</span>
     <div class="taggrid" id="fSitu">
       ${situ.map(([t,n])=>{
-        const on = S.include.includes(t);
+        const on = f.include.includes(t);
         return `<button class="tagbtn${on?' picked':''}" data-t="${esc(t)}">
           <span class="nm">${esc(t)}</span>
           <span class="ct">${n}</span></button>`;
@@ -884,7 +968,7 @@ function openFilters(){
     <span class="eyebrow" style="display:block;margin-top:6px">Type &amp; marks</span>
     <div class="factlist" id="fSpecial">
       ${special.map(([t,n])=>{
-        const on = S.require.includes(t), off = S.exclude.includes(t);
+        const on = f.require.includes(t), off = f.exclude.includes(t);
         return `<div class="factitem" data-t="${esc(t)}" data-n="${n}">
           <span class="nm${on?' required':off?' never':''}">${esc(t)}<span class="ct">${n}</span></span>
           <span class="seg">
@@ -903,26 +987,26 @@ function openFilters(){
      would shrink to if it were also Required — the original count crossed
      out, the hypothetical count beside it. */
   const updSpecialCounts = () => {
-    const filtersActive = S.include.length || S.require.length || S.exclude.length;
+    const filtersActive = filterActive(f);
     $('#fSpecial').querySelectorAll('.factitem').forEach(row => {
       const t = row.dataset.t, n = row.dataset.n;
       const ct = row.querySelector('.ct');
       if(filtersActive){
-        ct.innerHTML = `<s>${n}</s> ${requireCountWith(t)}`;
+        ct.innerHTML = `<s>${n}</s> ${requireCountWith(scope, t)}`;
       } else {
         ct.textContent = n;
       }
     });
   };
   const upd = () => {
-    $('#fCount').textContent = pool().length + ' spells in the pool';
+    $('#fCount').textContent = pool(scope).length + ' spells in the pool';
     updSpecialCounts();
   };
   upd();
   $('#fSitu').querySelectorAll('[data-t]').forEach(b => b.onclick = () => {
     const t = b.dataset.t;
-    const on = S.include.includes(t);
-    S.include = on ? S.include.filter(x=>x!==t) : [...S.include, t];
+    const on = f.include.includes(t);
+    f.include = on ? f.include.filter(x=>x!==t) : [...f.include, t];
     persist();
     b.classList.toggle('picked', !on);
     upd();
@@ -932,11 +1016,11 @@ function openFilters(){
     row.querySelectorAll('[data-mode]').forEach(btn => btn.onclick = () => {
       const mode = btn.dataset.mode;
       const wasOn = btn.classList.contains('on');
-      S.require = S.require.filter(x => x !== t);
-      S.exclude = S.exclude.filter(x => x !== t);
-      if(!wasOn){ if(mode === 'require') S.require.push(t); else S.exclude.push(t); }
+      f.require = f.require.filter(x => x !== t);
+      f.exclude = f.exclude.filter(x => x !== t);
+      if(!wasOn){ if(mode === 'require') f.require.push(t); else f.exclude.push(t); }
       persist();
-      const nowOn = S.require.includes(t), nowOff = S.exclude.includes(t);
+      const nowOn = f.require.includes(t), nowOff = f.exclude.includes(t);
       row.querySelector('[data-mode="require"]').classList.toggle('on', nowOn);
       row.querySelector('[data-mode="never"]').classList.toggle('on', nowOff);
       const nm = row.querySelector('.nm');
@@ -945,7 +1029,7 @@ function openFilters(){
       upd();
     });
   });
-  $('#fClear').onclick = () => { S.include = []; S.require = []; S.exclude = []; persist(); closeSheet(); renderAll(); };
+  $('#fClear').onclick = () => { f.include = []; f.require = []; f.exclude = []; persist(); closeSheet(); renderAll(); };
   $('#fDone').onclick = () => { closeSheet(); renderAll(); };
 }
 
@@ -975,7 +1059,7 @@ function renderLibrary(){
   const pile = PILES[libPile] || null;
   let list = pile ? pile.list() : active();
   if(libTag) list = list.filter(s => tagsOf(s).includes(libTag));
-  list = list.filter(s => matchesFilters(s));
+  list = list.filter(s => matchesFilters(s, S.filters.book));
   if(q) list = list.filter(s => s.text.toLowerCase().includes(q) || tagsOf(s).some(t=>t.includes(q)));
 
   list = list.slice().sort((a,b)=>{
@@ -987,7 +1071,7 @@ function renderLibrary(){
   $('#libTitle').textContent = pile ? pile.title : libTag ? libTag : 'The book';
   $('#libCount').textContent = list.length + (list.length===1?' spell':' spells');
 
-  const filtered = S.include.length || S.require.length || S.exclude.length;
+  const filtered = filterActive(S.filters.book);
   $('#libFilter').innerHTML = `
     ${libTag ? `<button class="chip on" id="clearTag">${esc(libTag)} <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>` : ''}
     ${pile ? `<button class="chip on" id="clearPile">${esc(pile.chip)} <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>` : ''}
@@ -998,7 +1082,7 @@ function renderLibrary(){
     <button class="chip" id="sortChip">${SORTS[S.sort]}</button>`;
   const ct = $('#clearTag'); if(ct) ct.onclick = () => { libTag=null; renderLibrary(); };
   const cp = $('#clearPile'); if(cp) cp.onclick = () => { libPile=null; renderLibrary(); };
-  $('#libFilterChip').onclick = openFilters;
+  $('#libFilterChip').onclick = () => openFilters('book');
   $('#sortChip').onclick = () => {
     const k = Object.keys(SORTS); S.sort = k[(k.indexOf(S.sort)+1)%k.length]; persist(); renderLibrary();
   };
@@ -1140,12 +1224,14 @@ function manageTag(tag){
     /* A tag that changes kind no longer belongs in the filter bucket it was
        sitting in — carry it to the matching one rather than leaving it
        stuck (Require/Never don't apply to situations) or silently dropped. */
-    if(kind === 'situation'){
-      if(S.require.includes(tag)){ S.require = S.require.filter(x=>x!==tag); if(!S.include.includes(tag)) S.include.push(tag); }
-      S.exclude = S.exclude.filter(x=>x!==tag);
-    } else {
-      if(S.include.includes(tag)){ S.include = S.include.filter(x=>x!==tag); if(!S.require.includes(tag)) S.require.push(tag); }
-    }
+    eachFilter(f => {
+      if(kind === 'situation'){
+        if(f.require.includes(tag)){ f.require = f.require.filter(x=>x!==tag); if(!f.include.includes(tag)) f.include.push(tag); }
+        f.exclude = f.exclude.filter(x=>x!==tag);
+      } else {
+        if(f.include.includes(tag)){ f.include = f.include.filter(x=>x!==tag); if(!f.require.includes(tag)) f.require.push(tag); }
+      }
+    });
     persist();
     $('#tgKind').querySelectorAll('[data-kind]').forEach(bb => bb.classList.toggle('on', bb.dataset.kind===kind));
     renderAll();
@@ -1166,9 +1252,11 @@ function manageTag(tag){
       }
       if(libTag === tag) libTag = next;
       doc.tags = knownTags().map(t => t === tag ? next : t).sort();
-      S.include = S.include.map(t => t === tag ? next : t);
-      S.require = S.require.map(t => t === tag ? next : t);
-      S.exclude = S.exclude.map(t => t === tag ? next : t);
+      eachFilter(f => {
+        f.include = f.include.map(t => t === tag ? next : t);
+        f.require = f.require.map(t => t === tag ? next : t);
+        f.exclude = f.exclude.map(t => t === tag ? next : t);
+      });
       if(Object.prototype.hasOwnProperty.call(S.tagKindOverrides, tag)){
         S.tagKindOverrides[next] = S.tagKindOverrides[tag];
         delete S.tagKindOverrides[tag];
@@ -1179,8 +1267,8 @@ function manageTag(tag){
 
     /* Deleting is now a real delete, and the only way a tag leaves the book:
        off every spell that wears it, and out of the vocabulary. It has to
-       clear all four places the name can be held — spells, the three filter
-       lists, the kind override — or syncTagVocabulary() would put it back on
+       clear all four places the name can be held — spells, the filters (three
+       lists in each of the three scopes), the kind override — or syncTagVocabulary() would put it back on
        the next boot from whichever one still pointed at it. */
     let armed = false;
     $('#tgDel').onclick = () => {
@@ -1196,9 +1284,11 @@ function manageTag(tag){
       for(const s of held){ s.tags = s.tags.filter(t => t !== tag); s.updatedAt = now(); }
       if(libTag === tag) libTag = null;
       forgetTag(tag);
-      S.include = S.include.filter(t => t !== tag);
-      S.require = S.require.filter(t => t !== tag);
-      S.exclude = S.exclude.filter(t => t !== tag);
+      eachFilter(f => {
+        f.include = f.include.filter(t => t !== tag);
+        f.require = f.require.filter(t => t !== tag);
+        f.exclude = f.exclude.filter(t => t !== tag);
+      });
       delete S.tagKindOverrides[tag];
       persist(); closeSheet(); renderAll(); renderTags();
       toast('Deleted ' + tag);
@@ -1254,9 +1344,12 @@ function renderVault(){
         <input id="wFlagged" type="number" step="0.1" min="0" inputmode="decimal"
           style="width:60px;padding:7px 8px;text-align:center;flex-shrink:0" value="${S.flaggedWeight}">
       </div>
-      <button class="item" id="vFilters">
+    </div>
+
+    <div class="group"><span class="eyebrow">The widget</span>
+      <button class="item" id="vWidgetFilter">
         <svg viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4"/></svg>
-        <span class="lab">Filters<span class="s">${esc(filterSummary())}</span></span></button>
+        <span class="lab">Widget filter<span class="s">${esc(filterSummary('widget'))} · the draw weights above still apply</span></span></button>
     </div>
 
     <div class="group"><span class="eyebrow">Being called</span>
@@ -1311,7 +1404,7 @@ function renderVault(){
   $('#vTriage').onclick = triage;
   $('#vGrave').onclick = () => openPile(GRAVEYARD);
   $('#vShelf').onclick = () => openPile(SHELVED);
-  $('#vFilters').onclick = openFilters;
+  $('#vWidgetFilter').onclick = () => openFilters('widget');
   $('#vNotify').onclick = () => openReminders();
   $('#vExport').onclick = exportBook;
   $('#vFolder').onclick = () => openBackupFolder(bk);
