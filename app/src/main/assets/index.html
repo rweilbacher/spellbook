@@ -58,6 +58,14 @@
     <div class="taggrid" id="tagGrid"></div>
   </section>
 
+  <!-- ============ CIRCLE ============
+       Other books, in a room together. Entered from the Vault; the nav tab
+       exists only while there's a circle. js/circle.js. -->
+  <section class="screen hide" id="circle">
+    <div class="hdr"><h1>The circle</h1><span class="count" id="circleMeta"></span></div>
+    <div id="circleBody"></div>
+  </section>
+
   <!-- ============ VAULT ============ -->
   <section class="screen hide" id="vault">
     <div class="hdr"><h1>Vault</h1></div>
@@ -73,6 +81,8 @@
       <svg viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 015.5 4H10v16H5.5A1.5 1.5 0 014 18.5z"/><path d="M20 5.5A1.5 1.5 0 0018.5 4H14v16h4.5a1.5 1.5 0 001.5-1.5z"/></svg>Book</button>
     <button data-tab="tags">
       <svg viewBox="0 0 24 24"><path d="M3 12V5a2 2 0 012-2h7l9 9-9 9z"/><circle cx="7.5" cy="7.5" r="1.3"/></svg>Tags</button>
+    <button data-tab="circle" id="navCircle" class="hide">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="3.5" r="1.6"/><circle cx="19.4" cy="16.2" r="1.6"/><circle cx="4.6" cy="16.2" r="1.6"/></svg>Circle</button>
     <button data-tab="vault">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="12" cy="12" r="3.6"/><path d="M12 4v2M12 18v2"/></svg>Vault</button>
   </nav>
@@ -91,12 +101,14 @@
 <script src="./js/backup.js"></script>
 <script src="./js/reminders.js"></script>
 <script src="./js/sheet.js"></script>
+<script src="./js/circle.js"></script>
 <script>
 /* notifyText is deliberately absent: the default wording is Kotlin's, and
    the page reads it off notifyState() rather than keeping a second copy.
    adoptSettings() fills it in. See notifyLimits() in js/reminders.js. */
 const DEFAULTS = { drawCount:1, noRepeat:12, sort:'recent',
-  inboxWeight:3, flaggedWeight:1, tagKindOverrides:{}, btMic:true, notifyTimes:[] };
+  inboxWeight:3, flaggedWeight:1, tagKindOverrides:{}, btMic:true, notifyTimes:[],
+  circleName:'' };
 /* The shape of the file on disk. Stamped by persist(), read by
    runMigrations() to decide what a book of unknown vintage still needs.
    Bump it when a migration is added; the per-field guards stay as
@@ -336,6 +348,7 @@ function adoptSettings(){
   // migrateFilterScopes() knows the file still carries the one shared filter.
   if(!S.tagKindOverrides || typeof S.tagKindOverrides !== 'object') S.tagKindOverrides = {};
   S.notifyTimes = cleanTimes(S.notifyTimes);
+  if(typeof S.circleName !== 'string') S.circleName = '';
   if(typeof S.notifyText !== 'string' || !S.notifyText) S.notifyText = notifyLimits().defaultText;
 }
 
@@ -677,7 +690,7 @@ function card(s, opt={}){
 function sourceHtml(s){
   const src = s.source || {};
   const rows = [];
-  const origin = {obsidian:'Obsidian vault', manual:'Written here', import:'Imported'}[src.origin] || src.origin || 'unknown';
+  const origin = {obsidian:'Obsidian vault', manual:'Written here', import:'Imported', circle:'From the circle'}[src.origin] || src.origin || 'unknown';
   rows.push(['Origin', esc(origin)]);
   if(src.capturedAt) rows.push(['Captured', esc(src.capturedAt)]);
   else if(src.note) rows.push(['Note', esc(src.note)]);
@@ -1123,12 +1136,14 @@ function openSpell(s){
      of sideways ones. */
   sheet('spell', 'Spell', `<div id="sheetCard">${card(s,{delay:undefined})}</div>
     <button class="btn ghost" id="spNotes">${noteCount ? `Notes (${noteCount})` : 'Notes'}</button>
+    ${circleSheetButton(s)}
     <button class="btn ghost" id="spEdit">Edit</button>
     ${grave ? '' : `<button class="btn ghost" id="spShelf">${shelf?'Take off the shelf':'Put on the shelf'}</button>`}
     <button class="btn ${grave?'':'danger'}" id="spGrave">${grave?'Restore to the book':'Move to graveyard'}</button>`);
   $('#sheetCard .card').classList.remove('rise');
   $('#spNotes').onclick = () => { closeSheet(); openNotes(s); };
   $('#spEdit').onclick = () => { closeSheet(); editSpell(s); };
+  wireCircleSheetButton(s);
   if($('#spShelf')) $('#spShelf').onclick = () => {
     // Shelving from here settles the inbox the same way the card's quick
     // action does — the two are the same move, reached differently.
@@ -1349,6 +1364,12 @@ function renderVault(){
       </div>
     </div>
 
+    <div class="group"><span class="eyebrow">Together</span>
+      <button class="item" id="vCircle">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="3.5" r="1.6"/><circle cx="19.4" cy="16.2" r="1.6"/><circle cx="4.6" cy="16.2" r="1.6"/></svg>
+        <span class="lab">The circle<span class="s">${esc(circleSummary())}</span></span></button>
+    </div>
+
     <div class="group"><span class="eyebrow">The widget</span>
       <button class="item" id="vWidgetFilter">
         <svg viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4"/></svg>
@@ -1408,6 +1429,7 @@ function renderVault(){
   $('#vGrave').onclick = () => openPile(GRAVEYARD);
   $('#vShelf').onclick = () => openPile(SHELVED);
   $('#vWidgetFilter').onclick = () => openFilters('widget');
+  $('#vCircle').onclick = () => go('circle');
   $('#vNotify').onclick = () => openReminders();
   $('#vExport').onclick = exportBook;
   $('#vFolder').onclick = () => openBackupFolder(bk);
@@ -1868,6 +1890,7 @@ function go(tab){
   if(tab === 'tags'){ tagEditMode = false; renderTags(); }
   if(tab === 'vault') renderVault();
   if(tab === 'desk') renderDesk();
+  if(tab === 'circle') renderCircle();
   if(tab === 'draw') renderFilterBar();
   document.querySelector('#'+tab).scrollTop = 0;
 }
@@ -1882,6 +1905,7 @@ function renderAll(){
   if(!$('#tags').classList.contains('hide')) renderTags();
   if(!$('#vault').classList.contains('hide')) renderVault();
   if(!$('#desk').classList.contains('hide')) renderDesk();
+  if(!$('#circle').classList.contains('hide')) renderCircle();
 }
 /* One way to redraw a card in place, used everywhere.
    There used to be two: this one replaced the whole element, while the

@@ -83,13 +83,17 @@ rendering could not be switched off.
 - **`notes`** is a thread of `{id, type, text|file, createdAt}`. `type` is
   `text` or `voice`; a voice note carries `file` and `duration`, and its audio
   lives in `files/media/`, never in this file.
-- **`source.origin`** is `manual`, `obsidian` or `import`.
+- **`source.origin`** is `manual`, `obsidian`, `import` or `circle`. A spell
+  taken from the circle carries `note: "from <name>"` and the day it was taken
+  in `capturedAt`, and nothing else — see the circle spec in `roadmap.md`. No
+  schema bump: an older build shows the raw origin and is otherwise unaffected.
 
 ## Settings
 
 `drawCount` · `filters` (the sticky filters, one per screen — see below) ·
 `noRepeat` · `sort` · `inboxWeight` · `flaggedWeight` · `tagKindOverrides` ·
-`btMic` · `notifyTimes` · `notifyText`.
+`btMic` · `notifyTimes` · `notifyText` · `circleName` (what the circle calls
+you; empty until you first open or join one).
 
 `DEFAULTS` in `index.html` holds every default except `notifyText`, which is
 Kotlin's (`Reminders.DEFAULT_TEXT`, read across the bridge — see

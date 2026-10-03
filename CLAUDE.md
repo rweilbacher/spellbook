@@ -16,6 +16,7 @@ app/src/main/assets/       the app itself
   js/reminders.js          the daily reminders
   js/backup.js             the chosen backup folder
   js/sheet.js              the bottom sheet
+  js/circle.js             the circle — a socket to the relay
 app/src/main/java/com/spellbook/
   MainActivity.kt          the WebView host, permissions, emit()
   SpellbookBridge.kt       every @JavascriptInterface method
@@ -23,7 +24,10 @@ app/src/main/java/com/spellbook/
   Reminders.kt             alarms and notifications
   SpellWidget.kt           the home screen widget
   Backups.kt               the chosen backup folder
+relay/                     the circle's relay: room.js (pure), worker.js
+                           (Cloudflare). Deployed separately — relay/README.md
 tools/smoke.mjs            the test suite
+tools/relay.mjs            the same relay, locally, for the suite and the desk
 docs/                      design, architecture, bridge, data format, roadmap
 docs/decisions/            why things are the way they are
 ```

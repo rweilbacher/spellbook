@@ -41,6 +41,9 @@ Low priority, genuinely fun, unspecified. Playing with other people's books at e
 **Games** need shared state. The trick that fits: one phone hosts a small web server over the venue wifi and everyone else joins by opening a URL. No iOS app, because there is no app — the host's phone is the venue. The architecture already suits this, since the whole thing is a web page.
 
 Ideas, unfiltered: spells drawn against each other with the room voting on which lands harder; drawing from a stranger's book; a shared draw where everyone gets the same spell and says what it means to them.
+
+**Exchange is specced below as *The circle*** — over a relay rather than without a server, for the reasons given there.
+
 ---
 
 # Specs
@@ -142,6 +145,157 @@ A connection to the Claude API. Three uses, in the order they should arrive.
 **v3 — the reader.** Once notes have accumulated: what keeps coming up, which spells actually move you, where the book is thin.
 
 **Technical.** The HTTPS call happens in Kotlin, not JavaScript — the key never enters the web layer and there's no CORS problem. Your own API key, entered in the Vault, stored in a separate file from the book so exports stay shareable. Haiku is enough for selection; the whole book is roughly 12k tokens, a fraction of a cent per call. Sending only `id` and `text` roughly halves that. **Privacy:** this sends your spells to Anthropic's API. Opt-in, off by default, stated plainly.
+
+## The circle
+
+The exchange half of *spellbooks in a room together*. Two or more people with
+the app open a shared space, lay spells down in it, and take copies of each
+other's into their own books. Same room or different cities, the same thing.
+
+**This breaks "without a server", deliberately.** Every serverless shape was
+weighed. QR codes are one-way and a few spells at a time. A phone hosting its
+own server means a Kotlin web server and a foreground service, and works only
+on wifi that lets phones see each other, which venue wifi usually doesn't.
+WebRTC is peer to peer until a carrier's NAT says otherwise, and then it needs
+a relay anyway. A relay that keeps nothing is the honest version of that
+fallback, used from the start.
+
+### The relay
+
+A Cloudflare Worker and one Durable Object per circle, in `relay/` beside
+`app/` and deployed by an Actions workflow the way the APK is built. Plain JS,
+no build step on our side. Everything fits in the free plan by orders of
+magnitude: an evening's session is a few hundred WebSocket messages, billed at
+20:1, against 100,000 requests a day.
+
+**No hibernation.** A hibernating Durable Object is cheaper and forgets its
+memory, and memory is the only place a circle lives. Awake, a circle is billed
+for duration — and the free plan's 13,000 GB-s a day is about a day of open
+circles, every day. The circle logic is one pure file, `relay/room.js`, which
+`tools/relay.mjs` also runs locally for the smoke suite.
+
+- **It holds the room and nothing else.** Who is present, and which spells are
+  lying in the circle. In memory only — nothing is written to storage, and a
+  circle is gone when its last person leaves. **The phones are the record:**
+  each one remembers what it laid down and lays it down again whenever it's
+  let back in, so a room lost to a deploy or an eviction is rebuilt by the
+  people in it.
+- **It sees spell text in the clear**, the way the djinn's API call would. A
+  typed code can't carry a key, and a short code isn't worth deriving one from.
+  Stated plainly in the Vault, same as the djinn.
+- **A seat is kept for five minutes after a drop.** The WebView is paused when
+  the screen sleeps and the socket goes with it; your seat and what you laid
+  down wait for you to come back, keyed by a token the page holds in memory.
+
+### The page side
+
+The socket lives in JavaScript, not Kotlin. There's no key to protect and no
+CORS for a WebSocket, so nothing argues for the shell — and keeping it in the
+page means **the circle works in preview mode**: two desktop tabs can sit in
+one circle, and `smoke.mjs` can drive exactly that against a Node copy of the
+room logic. The shell's only change is the `INTERNET` permission, if it isn't
+already declared.
+
+### A session
+
+1. **Open a circle.** The host gets a four-character code from an unambiguous
+   alphabet (no 0/O, no 1/I) and reads it out or sends it.
+2. **Join.** A guest types the code and a display name. The host approves each
+   arrival — a small ceremony, and the reason a guessable code doesn't matter.
+   The name is a setting, asked for once.
+3. **Lay down, pick up, take.** Anyone can lay a spell down; only its owner can
+   pick it up. Anyone else can take it.
+4. **Close the circle.** The host can end it for everyone. Otherwise it lasts
+   as long as anyone is in it.
+
+### What crosses the wire
+
+A laid-down spell carries its **text** and its **filing tags**, and nothing
+else. `inbox` and `flagged` stay home: they say how a spell is doing for you,
+not how it's filed. Not
+its notes or recordings, not `useful` or `drawn`, not its pile or its desk, not
+its `source` — which can carry Obsidian paths and URLs. **No counts at all**,
+not even as a signal of how well a spell has worked for its owner.
+
+The tags travel so you can **see how someone files a spell**, and that is all
+they do. They render on the card in the plain style, never brass, since brass
+means *you asked for this* (`design.md`).
+
+### Taking a spell
+
+Not `mergeSpells`. That path is for your own book arriving from another phone:
+it matches on id, overwrites text and tags, and brings notes across — voice
+notes included, whose audio would never arrive. Taking gets its own, smaller
+path:
+
+- **A fresh id.** The giver's id means nothing in your book.
+- **The text, and no tags.** Their vocabulary is theirs; a taken spell arrives
+  `untagged` plus `inbox`, which is what *unproven* means, and gets filed by
+  you in triage like anything else.
+- **Where it came from goes in `source`**:
+  `{origin:'circle', note:'from Ana', capturedAt:'2026-10-03', …}`, with the
+  other fields `null`. The source panel learns one label, *From the circle*,
+  and shows the name and the date. An older build shows the raw origin, which
+  is fine: no schema bump, no migration.
+- **Taking twice is a no-op.** The card says *in your book* once its text is
+  already there, matched on the trimmed text rather than an id — the same spell
+  from two different friends is still one spell.
+
+### Opening your book
+
+A switch in the circle, not in the Vault: **your book is closed** until you
+open it, and it closes itself when you leave. A standing "my book is
+searchable" setting is exactly the thing you'd forget was on.
+
+While it's open, other people can search it, and **your phone answers** — the
+query is forwarded to you and you reply with matches, so the relay never holds
+a book. Only `active` spells answer. The shelf and the graveyard never do, and
+dark spells, when they exist, are out by construction, the same way they're out
+of the draw.
+
+Browsing someone's opened book happens in the library: a **Your book | Ana's
+book** switch appears at the top while one is open, and search runs against
+their phone. Text search only, to begin with — their filter sheet would need
+their vocabulary.
+
+### The screen
+
+Entered from the Vault, under **Together**. A sixth tab, **Circle**, appears in
+the nav while there is one and goes when it ends, so the bar is five tabs on
+every day there isn't.
+
+One shared table rather than a trade window. A trade window's two panes and
+double confirm exist to protect something scarce, and giving a spell costs
+nothing; two panes also stop fitting a phone at three people.
+
+- Every card carries a small initial in its owner's colour; a chip row filters
+  to one person.
+- Someone else's card: **Take** and a heart (*this landed*). Your own: **Pick
+  up**, and who took it.
+- **Lay down from your book** opens a picker built from the library list, with
+  its search and filters. The detail sheet gets *Show in circle* while a
+  session is live. **No eighth icon on the card's action row** — it's already
+  overdue for more room.
+
+### In order
+
+1. The relay, the circle, laying down, taking into the inbox — **built**, with
+   hearts brought forward because they cost a line. Being tried phone to
+   browser before it's called shipped.
+2. Opening your book and browsing someone else's.
+3. The games, from the Someday list above.
+
+### Open
+
+- **Friends on iPhone.** The circle itself doesn't care what's on the other
+  end of the socket, but a book does. The cheap route is the page as a home-
+  screen web app with a browser storage backend — no widget, no chosen
+  microphone, reminders only via web push. A native shell is a Swift rewrite of
+  the six Kotlin files, a WidgetKit widget, an async bridge, and a paid
+  developer account to install it at all. Neither is part of this spec.
+- **The name.** *The circle*, *lay down*, *take*, *pick up* are being tried
+  on, not settled.
+
 ---
 
 # The rest of the hygiene backlog
@@ -167,12 +321,3 @@ than in the refactor plan so there's one place to look.
   `js/voice.js`, which handles `backup`, `open` and `notify` as well as `voice`;
   splitting it means a `js/native.js` owning the inbound half of the bridge next
   to `js/store.js`, which owns the outbound half.
-## Someday — spellbooks in a room together
-
-Low priority, genuinely fun, unspecified. Playing with other people's books at events, across the iOS/Android gap, without a server.
-
-**Exchange** is the easy half: a QR code carries a spell or a small set, readable by any camera. No app, no network, no pairing.
-
-**Games** need shared state. The trick that fits: one phone hosts a small web server over the venue wifi and everyone else joins by opening a URL. No iOS app, because there is no app — the host's phone is the venue. The architecture already suits this, since the whole thing is a web page.
-
-Ideas, unfiltered: spells drawn against each other with the room voting on which lands harder; drawing from a stranger's book; a shared draw where everyone gets the same spell and says what it means to them.

@@ -1,0 +1,6 @@
+{
+  "name": "spellbook-relay",
+  "private": true,
+  "type": "module",
+  "description": "The circle's relay. Deployed to Cloudflare; nothing here ships in the APK."
+}

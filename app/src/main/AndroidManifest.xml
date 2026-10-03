@@ -15,6 +15,10 @@
          with no times set the app never posts anything and never asks. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- The circle: a WebSocket to the relay (relay/), opened only when you
+         open or join one. Granted at install; nothing else uses the network. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <application

@@ -19,6 +19,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
+import { startRelay } from './relay.mjs';
+import { Room, LIMITS } from '../relay/room.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = process.argv[2] || path.join(HERE, '..', 'app', 'src', 'main', 'assets');
@@ -860,6 +862,185 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
   check('a pre-restore copy says what it is',
     (await p.locator('.sheet [data-snap]').nth(1).innerText()).includes('Before a restore'));
   await p.close();
+}
+
+// --------------------------------------------------------------- the circle
+/* The relay's rules, with no sockets: Room is pure, so a fake connection and
+   a fake clock are enough to test what it allows and what it forgets. */
+{
+  let clock = 1000;
+  const room = new Room({ now: () => clock });
+  const conn = () => { const c = { out: [], closed: null, send: s => c.out.push(JSON.parse(s)), close: (code) => { c.closed = code; } }; room.connect(c); return c; };
+  const say = (c, m) => room.receive(c, JSON.stringify(m));
+  const last = (c, t) => c.out.filter(m => m.t === t).pop();
+  const h = conn(), g = conn(), x = conn();
+  say(h, { t:'hello', name:'Host', host:true });
+  say(g, { t:'hello', name:'Guest' });
+  check('relay: a guest waits at the door', last(g, 'waiting') && !last(g, 'state'));
+  say(g, { t:'lay', key:'k', text:'sneaking in' });
+  check('relay: nothing counts from someone not let in', room.laid.size === 0);
+  say(x, { t:'hello', name:'Other', host:true });
+  check('relay: a second host is turned away', last(x, 'error')?.code === 'taken');
+  const gid = last(h, 'state').knocks[0].id;
+  say(g, { t:'approve', id:gid });
+  check('relay: only the host opens the door', !room.members.get(gid).approved);
+  say(h, { t:'approve', id:gid });
+  check('relay: the host lets someone in', !!last(g, 'welcome'));
+  say(h, { t:'lay', key:'a', text:'The host’s spell.', tags:['stuck'] });
+  say(g, { t:'pickup', key:'a' });
+  check('relay: nobody picks up a spell that isn’t theirs', room.laid.size === 1);
+  const sid = [...room.laid.keys()][0];
+  say(h, { t:'take', id:sid });
+  check('relay: you can’t take your own spell', room.laid.get(sid).takenBy.size === 0);
+  say(g, { t:'heart', id:sid }); say(g, { t:'heart', id:sid });
+  check('relay: a heart toggles', room.laid.get(sid).hearts.size === 0);
+  check('relay: an oversized message is refused',
+    (room.receive(g, 'x'.repeat(LIMITS.message + 1)), last(g, 'error')?.code === 'bad'));
+  // A drop keeps the seat; the grace running out gives it up.
+  say(g, { t:'lay', key:'b', text:'The guest’s spell.' });
+  room.disconnect(g);
+  check('relay: a dropped guest keeps their seat and their spells',
+    room.members.has(gid) && room.laid.size === 2);
+  clock += LIMITS.graceMs + 1; room.sweep();
+  check('relay: the seat is given up after the grace', !room.members.has(gid) && room.laid.size === 1);
+  room.disconnect(h);
+  clock += LIMITS.graceMs + 1; room.sweep();
+  check('relay: a host gone past the grace closes the circle', room.members.size === 0 && room.laid.size === 0);
+}
+
+/* Two books in one circle, through tools/relay.mjs: the same Room, behind a
+   real socket. Each page is a phone. */
+{
+  const relay = await startRelay();
+  const url = `${base}?relay=ws://127.0.0.1:${relay.port}`;
+  const junk = [];
+  const phone = async () => {
+    const p = await browser.newPage({ viewport: { width: 412, height: 915 } });
+    p.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') junk.push(`${m.type()}: ${m.text()}`); });
+    p.on('pageerror', e => junk.push(`pageerror: ${e.message}`));
+    await p.goto(url);
+    await p.waitForFunction(() => window.__booted === true);
+    return p;
+  };
+  const join = async (p, name, code) => {
+    await p.evaluate(() => go('circle'));
+    await p.fill('#cName', name);
+    await p.fill('#cCode', code);
+    await p.click('#cJoin');
+    await p.waitForFunction(() => C.phase === 'waiting');
+  };
+  const A = await phone(), B = await phone();
+
+  check('circle: nothing is opened at boot', await A.evaluate(() =>
+    C.phase === 'idle' && C.ws === null && $('#navCircle').classList.contains('hide')));
+
+  await A.click('nav button[data-tab="vault"]');
+  await A.click('#vCircle');
+  await A.fill('#cName', 'Host');
+  await A.click('#cOpen');
+  await A.waitForFunction(() => C.phase === 'live');
+  const code = await A.evaluate(() => C.code);
+  check('circle: opening one gives a four-character code', /^[A-HJ-NP-Z2-9]{4}$/.test(code), code);
+  check('circle: the name is kept as a setting', await A.evaluate(() => S.circleName) === 'Host');
+  check('circle: its tab appears while it lasts', await A.evaluate(() => !$('#navCircle').classList.contains('hide')));
+
+  await join(B, 'Guest', code);
+  await A.waitForSelector('#circle .knock');
+  check('circle: the host sees who is at the door',
+    (await A.locator('#circle .knock').innerText()).includes('Guest'));
+  await A.click('#circle .knock [data-c="approve"]');
+  await B.waitForFunction(() => C.phase === 'live' && C.st && C.st.members.length === 2);
+  check('circle: let in, the guest sees both of them', true);
+
+  // A spell of the host's own, with everything that must stay home on it.
+  await A.evaluate(() => {
+    const s = { id:'sp_circle', text:'A line only the host has.', tags:['stuck', 'inbox', 'flagged'],
+      useful:7, drawn:12, lastDrawn:now(), state:'active', desked:now(),
+      notes:[{ id:'nt_x', type:'text', text:'private', createdAt:now() }], createdAt:now(), updatedAt:now(),
+      source:{ origin:'obsidian', note:null, file:'Daily/2026-10-01.md', line:4, url:null, capturedAt:'2026-10-01' } };
+    doc.spells.push(s); layDown(s);
+  });
+  await B.waitForFunction(() => C.st.laid.some(s => s.text === 'A line only the host has.'));
+  const onWire = [...[...relay.rooms.values()][0].laid.values()][0];
+  check('circle: only the words and the filing tags leave the phone',
+    JSON.stringify(Object.keys(onWire).sort()) === JSON.stringify(['at','hearts','id','key','owner','tags','takenBy','text'])
+      && JSON.stringify(onWire.tags) === '["stuck"]', JSON.stringify(onWire));
+  check('circle: their tags show, plainly', await B.evaluate(() =>
+    [...document.querySelectorAll('#circle .ccard .tag')].some(t => t.textContent === 'stuck')
+      && !document.querySelector('#circle .ccard .tag.brass')));
+
+  const before = await B.evaluate(() => doc.spells.length);
+  await B.click('#circle .ccard:not(.mine) [data-c="take"]');
+  const taken = await B.evaluate(() => doc.spells.find(s => s.text === 'A line only the host has.'));
+  check('circle: taking adds the spell to the book', await B.evaluate(() => doc.spells.length) === before + 1);
+  check('circle: a taken spell arrives untagged, in the inbox',
+    taken && JSON.stringify(taken.tags) === '["inbox"]', JSON.stringify(taken && taken.tags));
+  check('circle: and carries nothing of its history',
+    taken && taken.useful === 0 && taken.drawn === 0 && taken.notes.length === 0 && !taken.desked && taken.id !== 'sp_circle');
+  check('circle: where it came from is in its source',
+    taken && taken.source.origin === 'circle' && taken.source.note === 'from Host'
+      && taken.source.capturedAt === new Date().toISOString().slice(0, 10) && !taken.source.file);
+  check('circle: the source panel names the circle', await B.evaluate(() =>
+    sourceHtml(doc.spells.find(s => s.source.origin === 'circle')).includes('From the circle')));
+  check('circle: taking it twice does nothing', await B.evaluate(() => {
+    const n = doc.spells.length;
+    return takeFromCircle(C.st.laid.find(s => s.owner !== C.me)) === null && doc.spells.length === n;
+  }));
+  await A.waitForFunction(() => C.st.laid[0].takenBy.length === 1);
+  check('circle: the giver sees who took it', (await A.locator('#circle .ccard.mine').innerText()).includes('Taken by Guest'));
+
+  await B.click('#circle .ccard:not(.mine) [data-c="heart"]');
+  await A.waitForFunction(() => C.st.laid[0].hearts.length === 1);
+  check('circle: a heart reaches the giver', true);
+
+  // A seat survives the socket dropping, the way a phone's screen going dark drops it.
+  await B.evaluate(() => {
+    const s = { id:'sp_guest', text:'The guest’s own line.', tags:[], useful:0, drawn:0, lastDrawn:null,
+      state:'active', desked:null, notes:[], createdAt:now(), updatedAt:now(), source:{ origin:'manual' } };
+    doc.spells.push(s); layDown(s);
+  });
+  await A.waitForFunction(() => C.st.laid.length === 2);
+  const seat = await B.evaluate(() => C.me);
+  await B.evaluate(() => C.ws.close());
+  await B.waitForFunction(() => C.phase === 'away');
+  await B.waitForFunction(() => C.phase === 'live', null, { timeout: 5000 });
+  check('circle: a dropped socket comes back to the same seat', await B.evaluate(() => C.me) === seat);
+  check('circle: with its spells still down', await A.evaluate(() => C.st.laid.length) === 2);
+
+  await A.click('#circle .ccard.mine [data-c="pickup"]');
+  await B.waitForFunction(() => C.st.laid.length === 1);
+  check('circle: picking up takes it out of everyone’s circle', true);
+
+  // The door can stay shut.
+  const X = await phone();
+  await join(X, 'Stranger', code);
+  await A.waitForSelector('#circle .knock');
+  await A.click('#circle .knock [data-c="refuse"]');
+  await X.waitForFunction(() => C.phase === 'idle');
+  check('circle: turned away, a guest is back where they started', true);
+
+  await B.click('#cLeave');
+  await A.waitForFunction(() => C.st.members.length === 1 && C.st.laid.length === 0);
+  check('circle: leaving takes your spells with you', await B.evaluate(() => C.phase) === 'idle');
+
+  await join(X, 'Stranger', code);
+  await A.waitForSelector('#circle .knock');
+  await A.click('#circle .knock [data-c="approve"]');
+  await X.waitForFunction(() => C.phase === 'live');
+  await A.click('#cLeave');
+  await X.waitForFunction(() => C.phase === 'idle');
+  check('circle: the host closing it ends it for everyone', await A.evaluate(() =>
+    C.phase === 'idle' && $('#navCircle').classList.contains('hide')));
+
+  await B.evaluate(() => { go('circle'); });
+  await B.fill('#cCode', 'ZZZZ');
+  await B.click('#cJoin');
+  await B.waitForFunction(() => C.phase === 'idle' && !C.ws);
+  check('circle: a code nobody opened finds no circle', true);
+
+  check('circle: no console noise from any phone', junk.length === 0, junk.join(' | '));
+  await A.close(); await B.close(); await X.close();
+  await relay.close();
 }
 
 await browser.close();

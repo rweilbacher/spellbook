@@ -2,6 +2,7 @@ package com.spellbook
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -116,6 +117,13 @@ class MainActivity : ComponentActivity() {
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
             .addPathHandler("/media/", VoiceNotePathHandler())
             .build()
+
+        // Chrome on a computer can read this page's console at chrome://inspect
+        // while the phone is plugged in — the way to see what a circle is doing
+        // on the real thing. Debug builds only, which is every build CI makes.
+        if ((applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            WebView.setWebContentsDebuggingEnabled(true)
+        }
 
         web = WebView(this).apply {
             layoutParams = ViewGroup.LayoutParams(

@@ -173,3 +173,18 @@ together, and `docs/bridge.md` for the contract between the two halves.
   redraws the chip, the library and the Vault's widget row behind the open
   sheet, so there is no Done button. Dismissing it any way — ✕, scrim, Android
   back — leaves the screens current, which the scrim and back never did before.
+- **The circle.** Two or more books in a room together: Vault → *Together* →
+  **The circle**. One phone opens a circle and reads out a four-character code;
+  others join with it, and the host lets each one in. Anyone can lay spells down
+  from their book; anyone else can **take** a copy, which lands in their inbox
+  untagged, with *From the circle · from Ana* and the day in its source. A heart
+  says a spell landed; the giver sees who took what. A sixth nav tab exists only
+  while there's a circle. Only a spell's words and filing tags leave the phone —
+  not notes, recordings, counts, its pile or its source, and not `inbox` or
+  `flagged`. Runs through a relay on Cloudflare's free plan that keeps nothing
+  (`relay/`, `docs/decisions/0011`); a dropped socket keeps its seat for five
+  minutes and the phones re-lay their spells when they're back. The socket lives
+  in the page, so preview mode can join a circle too — a phone and a desktop
+  browser in one circle is how it's tested by hand. The app gains the `INTERNET`
+  permission for it, and debug builds can now be inspected from
+  `chrome://inspect`.

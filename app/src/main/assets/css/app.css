@@ -324,3 +324,36 @@ button.tag:active{border-color:var(--brass-dim)}
   *{animation-duration:.001s !important;transition-duration:.001s !important}
   .recharge.run{animation-duration:var(--cool) !important}
 }
+
+/* ---------- the circle ----------
+   Other people's spells, laid down. A circle card is a card that doesn't
+   answer to doc.spells, so it has its own class and its own data-c actions;
+   the owner's colour sits on the dot and the left edge, never on the tags —
+   brass still means only "you asked for this". */
+.ccode{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:38px;letter-spacing:.32em;
+  text-align:center;color:var(--brass);padding:18px 0 6px;margin-right:-.32em}
+.ccode-in{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.3em;
+  text-transform:uppercase;font-size:20px;text-align:center}
+.knock{display:flex;align-items:center;gap:8px;background:var(--raise);border:1px solid var(--brass-dim);
+  border-radius:12px;padding:10px 12px;margin:0 0 10px;font-size:14px}
+.knock span{flex:1;min-width:0}
+.knock b{font-weight:600;color:var(--brass)}
+.cpeople{margin-bottom:4px}
+.chip .dot{margin-right:6px}
+.chip.away{opacity:.6}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--c);vertical-align:1px}
+.c0{--c:#c4a05a}.c1{--c:#5fa8a0}.c2{--c:#c27a8a}.c3{--c:#9a8ac9}
+.c4{--c:#8fae78}.c5{--c:#6f9ccf}.c6{--c:#c98a5a}.c7{--c:#b9b08f}
+.clist{display:flex;flex-direction:column;gap:12px;padding:6px 0 4px}
+.ccard{background:var(--slate);border:1px solid var(--line);border-radius:15px;
+  padding:14px 19px 11px;position:relative;overflow:hidden}
+.ccard .spell{margin-bottom:12px}
+.cwho{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);
+  font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:7px}
+.cnote{font-size:12px;color:var(--dim);padding:0 6px}
+.cnote.right{margin-left:auto}
+.act.still{cursor:default}
+.act.take{color:var(--brass);border:1px solid var(--brass-dim);padding:6px 14px}
+.row.laid .t{color:var(--brass)}
+.ccard::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;
+  background:linear-gradient(180deg,var(--c),transparent 85%);opacity:.7}

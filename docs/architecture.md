@@ -68,10 +68,11 @@ blocked on a provider that may be a cloud mount.
 
 ## The screens
 
-Five `.screen` sections inside `#app`, one visible at a time, plus the nav bar:
+Six `.screen` sections inside `#app`, one visible at a time, plus the nav bar:
 **draw** (the sigil, the cast, the revealed cards), **desk**, **library**
 (the book, search, sort, and the two other piles — the shelf and the graveyard),
-**tags**, **vault** (everything else).
+**tags**, **circle** (other books in a room together — its tab exists only while
+there is one), **vault** (everything else).
 Modal work happens in one bottom `.sheet` at a time.
 
 `#recovery` sits outside `#app` and replaces it entirely. That is deliberate:
@@ -92,6 +93,16 @@ interactions are delegated from one listener on `document`, matched on
 `patchCard(s, el)` is the only way a card is redrawn in place. It carries over
 what belongs to the element rather than to the spell: the entrance animation
 doesn't replay, an open source panel stays open, and the badge keeps its kind.
+
+## The circle
+
+The one part of the app that talks to a network, and only once you open or
+join a circle. The socket is opened by the page (`js/circle.js`), not by
+Kotlin — no key to protect, no CORS for a WebSocket — so it works in preview
+mode too, and a phone and a desktop browser can sit in one circle. The other
+end is `relay/`: a Cloudflare Worker holding each circle in memory, running
+the same `relay/room.js` that `tools/relay.mjs` runs for the smoke suite.
+The shell's only part in it is the `INTERNET` permission.
 
 ## Performance
 

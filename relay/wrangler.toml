@@ -1,0 +1,14 @@
+# The circle's relay. See worker.js, and the circle spec in docs/roadmap.md.
+name = "spellbook-relay"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+
+[[durable_objects.bindings]]
+name = "CIRCLES"
+class_name = "Circle"
+
+# The free plan only offers SQLite-backed Durable Objects. Nothing is ever
+# written to that storage; a circle lives in memory and nowhere else.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Circle"]

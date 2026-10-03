@@ -35,6 +35,12 @@ not delete or regenerate it: a new key means another forced uninstall.
 You can confirm it in the Actions log — the "Show signing fingerprint" step
 prints a SHA-256 that should be byte-identical on every run.
 
+## The circle's relay
+
+The circle needs a small server, deployed separately from the APK — free, on
+Cloudflare. How to deploy it, and how to run it locally, is in
+[`relay/README.md`](relay/README.md).
+
 ## Iterating
 
 Edit, push, download the new APK. There is no build step for the web layer: the
