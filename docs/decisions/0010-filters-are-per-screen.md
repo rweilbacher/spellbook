@@ -84,3 +84,7 @@ way to be narrowed at all without narrowing everything else.
   cadence* in `../roadmap.md`, now with a reason a person causes on purpose.
   It is not solved here.
 - A restore brings all three filters back. A merge ignores settings, as ever.
+- **A fourth scope, `lay`**, came with the circle: the picker you lay spells
+  down from narrows by its own filter, for the same reason the other three are
+  apart. No schema bump — `migrateFilterScopes()` already guards that every
+  scope exists. See the circle spec in `../roadmap.md`.

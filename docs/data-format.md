@@ -107,11 +107,15 @@ it, so a file from anywhere gets the same treatment.
 
 ### The filters
 
-`settings.filters` holds three independent sticky filters — `draw`, `book`
-(the library) and `widget` — each `{include, require, exclude}`: include ORs,
+`settings.filters` holds four independent sticky filters — `draw`, `book`
+(the library), `widget`, and `lay` (the circle's lay-down picker) — each
+`{include, require, exclude}`: include ORs,
 require ANDs, exclude vetoes, and the three combine with AND. Tags are names,
 and computed ones (`question`, `untagged`, `useful`) are legal in any of them.
 The widget's is the only one `SpellWidget.kt` reads. `decisions/0010`.
+`lay` arrived without a schema bump: `migrateFilterScopes()` already repairs a
+missing scope, so a v5 book gains an empty one on its next boot, in that boot's
+one write.
 
 Before v5 there was one shared set at `settings.include` / `require` / `exclude`.
 `migrateFilterScopes()` copies it into `draw` and `book`, leaves `widget` empty,

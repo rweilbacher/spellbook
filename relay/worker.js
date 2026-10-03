@@ -2,7 +2,7 @@
    The real relay: a Cloudflare Worker that hands each circle to its own
    Durable Object, which holds one Room (room.js) in memory.
 
-     wss://<this worker>/c/K7QX
+     wss://<this worker>/c/RFX4K
 
    No hibernation, on purpose. A hibernating object loses its memory, and
    memory is the only place a circle lives; the free plan's duration
@@ -17,7 +17,7 @@ import { Room, CODE_RE } from './room.js';
 export default {
   async fetch(req, env){
     const url = new URL(req.url);
-    const m = url.pathname.match(/^\/c\/([A-Z0-9]{4})$/);
+    const m = url.pathname.match(/^\/c\/([A-Z0-9]{4,6})$/);
     if(!m) return new Response('spellbook relay\n', { status: url.pathname === '/' ? 200 : 404 });
     if(!CODE_RE.test(m[1])) return new Response('bad code\n', { status: 400 });
     if(req.headers.get('Upgrade') !== 'websocket') return new Response('websocket only\n', { status: 426 });

@@ -188,3 +188,20 @@ together, and `docs/bridge.md` for the contract between the two halves.
   browser in one circle is how it's tested by hand. The app gains the `INTERNET`
   permission for it, and debug builds can now be inspected from
   `chrome://inspect`.
+- **The circle, second pass.** The code is the key: no more letting people in —
+  anyone with it is straight in. Codes are five characters drawn from the
+  eighteen letters and digits that look most like runes (`F H K M N R T X Y Z A
+  B L P V W 4 7`), typed in any case. **Open your book** from the circle screen
+  and everyone in the circle can look through all of its active spells, search
+  them, narrow them with your own draw or book filter or by your tags, and take
+  copies; you hear when someone does. Counts, notes, sources, `inbox` and
+  `flagged` still stay home, and the book closes itself when you leave. The
+  lay-down picker has **its own sticky filter**, `settings.filters.lay`, a
+  fourth scope that older books gain on their next boot. A laid-down spell you
+  reword or bury updates in the circle by itself. The relay closes a circle
+  after **two quiet hours**, so one left open on a table can't sit there awake
+  all day. The relay's address is a setting on the circle screen, with a
+  connection test.
+- Being taken from is never missable: a toast and a buzz wherever you are, a
+  mark on the Circle tab until you look, and a *Taken from you* list at the top
+  of the circle screen for as long as the circle lasts.

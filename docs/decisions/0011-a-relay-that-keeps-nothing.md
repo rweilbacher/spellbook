@@ -37,6 +37,21 @@ circle works in preview mode: a phone and a desktop browser can share a
 circle, which is how it is tested by hand, and two Playwright pages can share
 one, which is how the suite tests it.
 
+**The code is the key.** The first version had the host let each person in.
+It was ceremony, and it's gone: a five-character code from an eighteen-symbol
+alphabet is nearly two million possibilities, and a circle lives for an
+evening.
+
+**An open book passes through.** Opening your book is full access, filters
+included, so the book itself goes to the circle and the relay holds it in
+memory while it's open. The first spec forwarded queries to the owner's phone
+so the relay never held a book; that couldn't carry the owner's filters to
+someone else's screen.
+
+**Two quiet hours close a circle.** Pings keep sockets — and the Durable Object
+— awake, and an awake object is billed for duration. One circle left open on a
+table all day would use most of the free allowance by itself.
+
 **One room, two shells.** The Worker and the local relay are each forty-odd
 lines around the same `Room`, so the code the suite exercises is the code the
 phones talk to.

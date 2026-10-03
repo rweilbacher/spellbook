@@ -184,8 +184,13 @@ circles, every day. The circle logic is one pure file, `relay/room.js`, which
   typed code can't carry a key, and a short code isn't worth deriving one from.
   Stated plainly in the Vault, same as the djinn.
 - **A seat is kept for five minutes after a drop.** The WebView is paused when
-  the screen sleeps and the socket goes with it; your seat and what you laid
-  down wait for you to come back, keyed by a token the page holds in memory.
+  the screen sleeps and the socket goes with it; your seat, what you laid
+  down and your open book wait for you to come back, keyed by a token the page
+  holds in memory.
+- **Two quiet hours close a circle.** Pings keep sockets alive, so a phone left
+  open on a table would keep a circle awake — and billed for duration — for
+  ever. Anything but a ping counts as activity; two hours without any and the
+  relay closes the circle and says why.
 
 ### The page side
 
@@ -198,15 +203,24 @@ already declared.
 
 ### A session
 
-1. **Open a circle.** The host gets a four-character code from an unambiguous
-   alphabet (no 0/O, no 1/I) and reads it out or sends it.
-2. **Join.** A guest types the code and a display name. The host approves each
-   arrival — a small ceremony, and the reason a guessable code doesn't matter.
-   The name is a setting, asked for once.
+1. **Open a circle.** The host gets a five-character code drawn from the
+   eighteen letters and digits that look most like runes — straight strokes,
+   no curves: `F H K M N R T X Y Z A B L P V W 4 7`. No 0/O or 1/I to confuse,
+   by construction. They read it out or send it.
+2. **Join.** A guest types the code (any case) and a display name, and is in.
+   **The code is the key**; there was a door the host had to open, and it was
+   ceremony nobody wanted. Five characters from eighteen is nearly two million
+   codes — enough that stumbling on a live one isn't a plan. The name is a
+   setting, asked for once.
 3. **Lay down, pick up, take.** Anyone can lay a spell down; only its owner can
    pick it up. Anyone else can take it.
-4. **Close the circle.** The host can end it for everyone. Otherwise it lasts
-   as long as anyone is in it.
+4. **Closing.** Three ways, and only three:
+   - **The host closes it** — or leaves, which is the same thing: it was theirs
+     to open, and a circle that outlives its host is a stranger's room.
+   - **The host drops and doesn't come back** within the five-minute seat.
+   - **Two quiet hours** — see the relay, above.
+   A guest leaving, or dropping past their five minutes, takes their spells and
+   their open book with them and leaves the circle as it was.
 
 ### What crosses the wire
 
@@ -247,16 +261,30 @@ A switch in the circle, not in the Vault: **your book is closed** until you
 open it, and it closes itself when you leave. A standing "my book is
 searchable" setting is exactly the thing you'd forget was on.
 
-While it's open, other people can search it, and **your phone answers** — the
-query is forwarded to you and you reply with matches, so the relay never holds
-a book. Only `active` spells answer. The shelf and the graveyard never do, and
-dark spells, when they exist, are out by construction, the same way they're out
-of the draw.
+**Opening it is full access**, and that includes your filters. What goes:
 
-Browsing someone's opened book happens in the library: a **Your book | Ana's
-book** switch appears at the top while one is open, and search runs against
-their phone. Text search only, to begin with — their filter sheet would need
-their vocabulary.
+- the **words and filing tags of every active spell** — the shelf and the
+  graveyard never, and dark spells, when they exist, out by construction;
+- the **names of your situations**, so a visitor's `untagged` means what yours
+  does;
+- your **draw and book filters**, so a visitor can look through your book the
+  way you do.
+
+Still not: counts, notes, recordings, sources, `inbox` or `flagged` — and so
+not `useful` either, which is a count. Filters lose those tags on the way out.
+
+This **reverses the first version of this spec**, which had the visitor's
+query forwarded to your phone so the relay never held a book. Full access with
+your filters wants the whole book on the visitor's side, where their own
+filtering can run on it; so the book is sent once when you open it, and again a
+moment after any save while it's open. The relay holds it in memory, like
+everything else, and forgets it when you close it or leave.
+
+Looking through someone's book is a **sheet over the circle screen**, not the
+library: their spells, a search, their draw and book filters as one-tap
+presets, and their tags as chips — situations OR'd, the rest AND'd, as in your
+own filter sheet. **Take** works as it does on a laid-down card, and the owner
+hears that someone took from their book.
 
 ### The screen
 
@@ -272,17 +300,23 @@ nothing; two panes also stop fitting a phone at three people.
   to one person.
 - Someone else's card: **Take** and a heart (*this landed*). Your own: **Pick
   up**, and who took it.
+- **Being taken from is never missable.** A toast and a buzz wherever you are;
+  a mark on the Circle tab until you look; and a *Taken from you* list at the
+  top of the circle screen — who, which spell, from the table or from your
+  open book, and when — for as long as the circle lasts.
 - **Lay down from your book** opens a picker built from the library list, with
-  its search and filters. The detail sheet gets *Show in circle* while a
-  session is live. **No eighth icon on the card's action row** — it's already
-  overdue for more room.
+  a search and **its own sticky filter**, `settings.filters.lay` — a fourth
+  scope, by the same reasoning as `decisions/0010`. The detail sheet gets *Lay
+  down in the circle* while a session is live. **No eighth icon on the card's
+  action row** — it's already overdue for more room.
 
 ### In order
 
 1. The relay, the circle, laying down, taking into the inbox — **built**, with
    hearts brought forward because they cost a line. Being tried phone to
    browser before it's called shipped.
-2. Opening your book and browsing someone else's.
+2. Opening your book and browsing someone else's — **built**, together with
+   the code-is-the-key change and the lay-down filter.
 3. The games, from the Someday list above.
 
 ### Open

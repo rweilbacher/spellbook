@@ -357,3 +357,22 @@ button.tag:active{border-color:var(--brass-dim)}
 .row.laid .t{color:var(--brass)}
 .ccard::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;
   background:linear-gradient(180deg,var(--c),transparent 85%);opacity:.7}
+/* Filter rows inside a sheet scroll with it rather than sticking. */
+.sheet .filterbar{position:static;background:none;padding-top:8px}
+.cbrow{padding-top:6px !important;padding-bottom:0 !important}
+.cbrow .ct{color:var(--dim);margin-left:3px;font-variant-numeric:tabular-nums}
+.chip.on .ct{color:var(--brass-dim)}
+.brow .m{gap:9px}
+/* What's been taken from you, while the circle lasts. */
+.cfeed{background:var(--raise);border:1px solid var(--brass-dim);border-radius:12px;padding:11px 14px 9px;margin:0 0 6px}
+.cfeed .eyebrow{color:var(--brass-dim);display:block;margin-bottom:6px}
+.cfeed-row{display:flex;align-items:baseline;gap:8px;font-size:13.5px;line-height:1.45;padding:3px 0}
+.cfeed-row .dot{flex-shrink:0;transform:translateY(-1px)}
+.cfeed-row .tx{flex:1;min-width:0}
+.cfeed-row b{font-weight:600;color:var(--ink)}
+.cfeed-row .from,.cfeed-row .at,.cfeed-more{color:var(--dim);font-size:12px}
+.cfeed-more{padding-top:2px}
+.cnote.taken{color:var(--brass)}
+nav button.news{position:relative}
+nav button.news::after{content:'';position:absolute;top:9px;left:calc(50% + 8px);width:7px;height:7px;
+  border-radius:50%;background:var(--brass)}

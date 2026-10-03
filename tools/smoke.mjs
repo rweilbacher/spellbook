@@ -339,7 +339,8 @@ const aBook = (over = {}) => JSON.stringify(Object.assign({
               tagKindOverrides: { brass: 'situation' }, drawCount: 3,
               filters: { draw: { include: [], require: [], exclude: [] },
                          book: { include: [], require: [], exclude: [] },
-                         widget: { include: [], require: [], exclude: [] } } },
+                         widget: { include: [], require: [], exclude: [] },
+                         lay: { include: [], require: [], exclude: [] } } },
   tags: ['brass', 'stuck'],
   spells: [
     spell({ id: 'sp_keep', text: 'A spell with a history.', useful: 4, drawn: 9,
@@ -659,7 +660,7 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
   const f = await p.evaluate(() => JSON.stringify(S.filters));
   const both = JSON.stringify(F(['stuck'], ['flagged'], ['practice']));
   check('a v4 book’s shared filter becomes the draw’s and the book’s',
-    f === JSON.stringify({ draw: JSON.parse(both), book: JSON.parse(both), widget: F() }), f);
+    f === JSON.stringify({ draw: JSON.parse(both), book: JSON.parse(both), widget: F(), lay: F() }), f);
   check('the widget starts with no filter', await p.evaluate(() => !filterActive(S.filters.widget)));
   check('the old flat lists are gone from settings',
     await p.evaluate(() => !('include' in S) && !('require' in S) && !('exclude' in S)));
@@ -784,13 +785,13 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
   await p.evaluate(() => { manageTag('practice'); });
   await p.fill('#tgName', 'rehearse');
   await p.click('#tgSave');
-  check('practice → rehearse, wherever it was held', await held('rehearse') === '001/000/001'
-    && await held('practice') === '000/000/000', await held('rehearse'));
+  check('practice → rehearse, wherever it was held', await held('rehearse') === '001/000/001/000'
+    && await held('practice') === '000/000/000/000', await held('rehearse'));
 
   await p.evaluate(() => { manageTag('rehearse'); });
   await p.click('#tgDel'); await p.click('#tgDel');
   check('deleting it clears every filter that held it',
-    await held('rehearse') === '000/000/000');
+    await held('rehearse') === '000/000/000/000');
   check('and the vocabulary does not bring it back',
     await p.evaluate(() => { syncTagVocabulary(); return !doc.tags.includes('rehearse'); }));
 
@@ -799,7 +800,7 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
   await p.evaluate(() => { manageTag('stuck'); });
   await p.click('#tgKind [data-kind="special"]');
   check('changing kind moves it between buckets in every scope',
-    await held('stuck') === '010/010/000', await held('stuck'));
+    await held('stuck') === '010/010/000/000', await held('stuck'));
   await p.close();
 }
 
@@ -892,17 +893,12 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
   const last = (c, t) => c.out.filter(m => m.t === t).pop();
   const h = conn(), g = conn(), x = conn();
   say(h, { t:'hello', name:'Host', host:true });
-  say(g, { t:'hello', name:'Guest' });
-  check('relay: a guest waits at the door', last(g, 'waiting') && !last(g, 'state'));
-  say(g, { t:'lay', key:'k', text:'sneaking in' });
-  check('relay: nothing counts from someone not let in', room.laid.size === 0);
   say(x, { t:'hello', name:'Other', host:true });
   check('relay: a second host is turned away', last(x, 'error')?.code === 'taken');
-  const gid = last(h, 'state').knocks[0].id;
-  say(g, { t:'approve', id:gid });
-  check('relay: only the host opens the door', !room.members.get(gid).approved);
-  say(h, { t:'approve', id:gid });
-  check('relay: the host lets someone in', !!last(g, 'welcome'));
+  say(g, { t:'hello', name:'Guest' });
+  check('relay: the code is enough — a guest is straight in',
+    !!last(g, 'welcome') && last(h, 'state').members.length === 2);
+  const gid = last(g, 'welcome').you.id;
   say(h, { t:'lay', key:'a', text:'The host’s spell.', tags:['stuck'] });
   say(g, { t:'pickup', key:'a' });
   check('relay: nobody picks up a spell that isn’t theirs', room.laid.size === 1);
@@ -912,7 +908,23 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
   say(g, { t:'heart', id:sid }); say(g, { t:'heart', id:sid });
   check('relay: a heart toggles', room.laid.get(sid).hearts.size === 0);
   check('relay: an oversized message is refused',
-    (room.receive(g, 'x'.repeat(LIMITS.message + 1)), last(g, 'error')?.code === 'bad'));
+    (room.receive(g, JSON.stringify({ t:'lay', key:'z', text:'x'.repeat(LIMITS.message) })), last(g, 'error')?.code === 'bad'));
+  // An open book: cleaned, passed to the others, remembered for newcomers.
+  say(h, { t:'book', book:{ spells:[{ id:'sp_1', text:'One.', tags:['stuck'], useful:9, notes:['x'] }],
+    situations:['stuck'], tags:['stuck'], filters:{ draw:{ include:['stuck'], require:[], exclude:[] } } } });
+  const passed = last(g, 'book');
+  check('relay: an opened book reaches the others', passed && passed.owner === last(h, 'welcome').you.id
+    && passed.book.spells.length === 1);
+  check('relay: and only its words and tags', JSON.stringify(Object.keys(passed.book.spells[0]).sort()) === '["id","tags","text"]');
+  check('relay: the circle knows whose book is open', last(g, 'state').members.find(m => m.host).open === true);
+  const late = conn(); say(late, { t:'hello', name:'Late' });
+  check('relay: someone arriving later is handed the open book', !!last(late, 'book'));
+  say(g, { t:'tookbook', owner:last(h, 'welcome').you.id, id:'sp_1' });
+  check('relay: taking from a book is told to its owner alone',
+    last(h, 'tookbook')?.by === gid && !last(late, 'tookbook'));
+  say(h, { t:'book', book:null });
+  check('relay: closing it tells everyone', last(g, 'book').book === null && !room.books.size);
+  say(late, { t:'leave' });
   // A drop keeps the seat; the grace running out gives it up.
   say(g, { t:'lay', key:'b', text:'The guest’s spell.' });
   room.disconnect(g);
@@ -923,6 +935,15 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
   room.disconnect(h);
   clock += LIMITS.graceMs + 1; room.sweep();
   check('relay: a host gone past the grace closes the circle', room.members.size === 0 && room.laid.size === 0);
+  // Two quiet hours close a circle even with everyone still connected.
+  const r2 = new Room({ now: () => clock });
+  const a2 = { out: [], send: s => a2.out.push(JSON.parse(s)), close(){} };
+  r2.connect(a2); r2.receive(a2, JSON.stringify({ t:'hello', name:'A', host:true }));
+  clock += LIMITS.idleMs - 1000; r2.receive(a2, JSON.stringify({ t:'ping' })); r2.sweep();
+  check('relay: pings alone don’t keep a circle open…', r2.members.size === 1);
+  clock += 2000; r2.sweep();
+  check('relay: …and two quiet hours close it', r2.members.size === 0
+    && a2.out.some(m => m.t === 'closed' && m.why === 'idle'));
 }
 
 /* Two books in one circle, through tools/relay.mjs: the same Room, behind a
@@ -944,13 +965,12 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
     await p.fill('#cName', name);
     await p.fill('#cCode', code);
     await p.click('#cJoin');
-    await p.waitForFunction(() => C.phase === 'waiting');
+    await p.waitForFunction(() => C.phase === 'live');
   };
   const A = await phone(), B = await phone();
 
   check('circle: nothing is opened at boot', await A.evaluate(() =>
     C.phase === 'idle' && C.ws === null && $('#navCircle').classList.contains('hide')));
-
   check('circle: a pasted relay address becomes a socket address', await A.evaluate(() =>
     cleanRelay('https://spellbook-relay.someone.workers.dev/') === 'wss://spellbook-relay.someone.workers.dev'
       && cleanRelay('spellbook-relay.someone.workers.dev') === 'wss://spellbook-relay.someone.workers.dev'
@@ -974,17 +994,13 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
   await A.click('#cOpen');
   await A.waitForFunction(() => C.phase === 'live');
   const code = await A.evaluate(() => C.code);
-  check('circle: opening one gives a four-character code', /^[A-HJ-NP-Z2-9]{4}$/.test(code), code);
+  check('circle: a code is five rune-like characters', /^[FHKMNRTXYZABLPVW47]{5}$/.test(code), code);
   check('circle: the name is kept as a setting', await A.evaluate(() => S.circleName) === 'Host');
   check('circle: its tab appears while it lasts', await A.evaluate(() => !$('#navCircle').classList.contains('hide')));
 
-  await join(B, 'Guest', code);
-  await A.waitForSelector('#circle .knock');
-  check('circle: the host sees who is at the door',
-    (await A.locator('#circle .knock').innerText()).includes('Guest'));
-  await A.click('#circle .knock [data-c="approve"]');
-  await B.waitForFunction(() => C.phase === 'live' && C.st && C.st.members.length === 2);
-  check('circle: let in, the guest sees both of them', true);
+  await join(B, 'Guest', code.toLowerCase());
+  await A.waitForFunction(() => C.st && C.st.members.length === 2);
+  check('circle: the code alone lets a guest in, typed in any case', true);
 
   // A spell of the host's own, with everything that must stay home on it.
   await A.evaluate(() => {
@@ -1022,10 +1038,77 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
   }));
   await A.waitForFunction(() => C.st.laid[0].takenBy.length === 1);
   check('circle: the giver sees who took it', (await A.locator('#circle .ccard.mine').innerText()).includes('Taken by Guest'));
+  check('circle: and it stays written under “Taken from you”',
+    (await A.locator('#circle .cfeed').innerText()).includes('Guest took'));
 
   await B.click('#circle .ccard:not(.mine) [data-c="heart"]');
   await A.waitForFunction(() => C.st.laid[0].hearts.length === 1);
   check('circle: a heart reaches the giver', true);
+
+  // An edit to a laid-down spell reaches the circle on its own.
+  await A.evaluate(() => { const s = doc.spells.find(x => x.id === 'sp_circle'); s.text = 'A line only the host has, reworded.'; persist(); });
+  await B.waitForFunction(() => C.st.laid.some(s => s.text === 'A line only the host has, reworded.'), null, { timeout: 4000 });
+  check('circle: rewording a laid-down spell updates it for everyone', true);
+
+  // The lay-down picker has its own filter.
+  await A.click('#cLay');
+  await A.waitForSelector('#clList .row');
+  const unfiltered = await A.locator('#clList .row').count();
+  await A.click('#clFilter');
+  await A.waitForSelector('.sheet[data-sheet="filters"]');
+  check('circle: the lay-down filter is its own sheet', /Lay-down filter/i.test(await A.locator('.sheet').innerText()));
+  await A.click('#fSitu [data-t="stuck"]');
+  await A.click('.sheet [data-close]');
+  await A.waitForSelector('.sheet[data-sheet="circle-lay"]');
+  const filtered = await A.locator('#clList .row').count();
+  check('circle: and narrows the picker, which comes back when it closes',
+    filtered > 0 && filtered < unfiltered, `${unfiltered} → ${filtered}`);
+  check('circle: without touching the draw or the book', await A.evaluate(() =>
+    S.filters.lay.include.join() === 'stuck' && !filterActive(S.filters.draw) && !filterActive(S.filters.book)));
+  await A.evaluate(() => { S.filters.lay = newFilter(); S.filters.draw = { include:['stuck'], require:[], exclude:[] }; closeSheet(); });
+
+  // A whole book, opened.
+  await A.click('#circle [data-c="book"][data-on="1"]');
+  await B.waitForFunction(() => C.books.size === 1);
+  check('circle: an opened book reaches the circle with all its active spells', await B.evaluate(() =>
+    [...C.books.values()][0].spells.length) === await A.evaluate(() => active().length));
+  check('circle: but not what stays home', await B.evaluate(() => {
+    const b = [...C.books.values()][0];
+    return b.spells.every(s => !s.tags.includes('inbox') && !s.tags.includes('flagged') && !('useful' in s) && !('notes' in s))
+      && !b.tags.includes('inbox') && !b.tags.includes('flagged');
+  }));
+  await B.click('#circle [data-c="browse"]');
+  await B.waitForSelector('#cbList .row');
+  const whole = await B.locator('#cbList .row').count();
+  await B.click('#cbChips [data-preset="draw"]');
+  const narrowed = await B.locator('#cbList .row').count();
+  check('circle: a visitor can use the owner’s own draw filter', narrowed > 0 && narrowed < whole, `${whole} → ${narrowed}`);
+  await B.click('#cbChips [data-preset="draw"]');
+  await B.fill('#cbSearch', 'only the host has');
+  check('circle: and search it', await B.locator('#cbList .row').count() === 1);
+  await B.fill('#cbSearch', '');
+  await B.evaluate(() => { const s = { id:'sp_hostonly', text:'Only in the host’s book.', tags:['stuck'], useful:0, drawn:0, lastDrawn:null,
+    state:'active', desked:null, notes:[], createdAt:now(), updatedAt:now(), source:{ origin:'manual' } }; return s; });
+  await A.evaluate(() => { doc.spells.push({ id:'sp_hostonly', text:'Only in the host’s book.', tags:['stuck'], useful:0, drawn:0,
+    lastDrawn:null, state:'active', desked:null, notes:[], createdAt:now(), updatedAt:now(), source:{ origin:'manual' } }); persist(); });
+  await B.waitForSelector('#cbList [data-take="sp_hostonly"]', { timeout: 4000 });
+  check('circle: an open book stays current as its owner writes', true);
+  await A.evaluate(() => go('draw'));
+  await B.click('#cbList [data-take="sp_hostonly"]');
+  check('circle: taking from an open book lands in the inbox, with its giver', await B.evaluate(() => {
+    const s = doc.spells.find(x => x.text === 'Only in the host’s book.');
+    return s && s.tags.join() === 'inbox' && s.source.note === 'from Host' && s.id !== 'sp_hostonly';
+  }));
+  await A.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('from your book'));
+  check('circle: the owner hears that someone took from their book', true);
+  check('circle: away from the circle, its tab carries a mark', await A.evaluate(() => $('#navCircle').classList.contains('news')));
+  await A.evaluate(() => go('circle'));
+  check('circle: which goes once you look, with the take listed', await A.evaluate(() =>
+    !$('#navCircle').classList.contains('news') && C.taken.length === 2 && C.taken[0].from === 'book'
+      && $('#circle .cfeed').textContent.includes('from your book')));
+  await A.click('#circle [data-c="book"][data-on="0"]');
+  await B.waitForFunction(() => C.books.size === 0 && openSheetName() !== 'circle-book');
+  check('circle: closing the book takes it away from the visitor', true);
 
   // A seat survives the socket dropping, the way a phone's screen going dark drops it.
   await B.evaluate(() => {
@@ -1045,29 +1128,19 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
   await B.waitForFunction(() => C.st.laid.length === 1);
   check('circle: picking up takes it out of everyone’s circle', true);
 
-  // The door can stay shut.
-  const X = await phone();
-  await join(X, 'Stranger', code);
-  await A.waitForSelector('#circle .knock');
-  await A.click('#circle .knock [data-c="refuse"]');
-  await X.waitForFunction(() => C.phase === 'idle');
-  check('circle: turned away, a guest is back where they started', true);
-
   await B.click('#cLeave');
   await A.waitForFunction(() => C.st.members.length === 1 && C.st.laid.length === 0);
   check('circle: leaving takes your spells with you', await B.evaluate(() => C.phase) === 'idle');
 
+  const X = await phone();
   await join(X, 'Stranger', code);
-  await A.waitForSelector('#circle .knock');
-  await A.click('#circle .knock [data-c="approve"]');
-  await X.waitForFunction(() => C.phase === 'live');
   await A.click('#cLeave');
   await X.waitForFunction(() => C.phase === 'idle');
   check('circle: the host closing it ends it for everyone', await A.evaluate(() =>
     C.phase === 'idle' && $('#navCircle').classList.contains('hide')));
 
   await B.evaluate(() => { go('circle'); });
-  await B.fill('#cCode', 'ZZZZ');
+  await B.fill('#cCode', 'ZZZZZ');
   await B.click('#cJoin');
   await B.waitForFunction(() => C.phase === 'idle' && !C.ws);
   check('circle: a code nobody opened finds no circle', true);

@@ -8,7 +8,7 @@ principles the rest of the app is downstream of.
 1. **Retrieval is by situation, not subject.** You open the book in a state, not in a topic. The index has to match the way you arrive.
 2. **Derived properties are not tags.** Anything computable from the spell — its length, whether it's a question, its language — is computed when needed, never stored. Stored derivations go stale on the first edit. This is about properties *of a spell*. The list of tags the book knows is authored content and is stored, because a tag with no members is real and the derived version had no way to say so — `decisions/0008`.
 3. **A spell earns its place by being used, not by being written.** Curation happens through the draw, the shelf and the graveyard, not through a big upfront sort.
-4. **Nothing leaves the device unless you ask.** The djinn and the circle are the exceptions, and both are opt-in. The circle sends only what you lay down, and only its words and filing tags.
+4. **Nothing leaves the device unless you ask.** The djinn and the circle are the exceptions, and both are opt-in. The circle sends only what you lay down, or your whole book if you open it — words, filing tags and your filters, never counts, notes or sources.
 5. **The file is the truth.** One JSON file, readable by a widget, portable to a rewrite, exportable as backup.
 
 ## The vocabulary

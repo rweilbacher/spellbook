@@ -179,13 +179,16 @@ function isSituationLike(t){
 /* A tag lights up on a card only if it's part of what you've actively
    filtered for right now — not just because it happens to be a situation.
    Keeps 'brass' meaning one thing: this is why the spell is in front of you. */
-/* Three sticky filters, one per screen that picks spells: the draw, the book
-   (the library), and the home screen widget. They share a shape and nothing
-   else — a filter set while browsing the book no longer narrows the draw, and
-   neither can reach the widget. See docs/decisions/0010. */
-const SCOPES = ['draw','book','widget'];
+/* Four sticky filters, one per screen that picks spells: the draw, the book
+   (the library), the home screen widget, and the circle's lay-down picker.
+   They share a shape and nothing else — a filter set while browsing the book
+   no longer narrows the draw, and none of them can reach the widget. See
+   docs/decisions/0010. The fourth arrived without a migration of its own:
+   migrateFilterScopes() already guards that every scope exists, so an older
+   book gains an empty one on its next boot. */
+const SCOPES = ['draw','book','widget','lay'];
 function newFilter(){ return { include:[], require:[], exclude:[] }; }
-function newFilters(){ return { draw:newFilter(), book:newFilter(), widget:newFilter() }; }
+function newFilters(){ return { draw:newFilter(), book:newFilter(), widget:newFilter(), lay:newFilter() }; }
 /* Every filter, with its scope. Anything that has to follow a tag across a
    rename, a delete or a change of kind goes through here, so a fourth scope
    would be picked up by all of them at once. */
@@ -511,6 +514,7 @@ function persist(){
   doc.version = SCHEMA;
   doc.exportedAt = now();
   Store.save(doc);
+  circleOnSave();          // a no-op unless there's a circle to tell
 }
 
 /* =========================================================================
@@ -958,10 +962,12 @@ const FILTER_SHEETS = {
   book:   { title:'Book filter',
             help:'Narrows the book only — the draw and the widget keep their own.' },
   widget: { title:'Widget filter',
-            help:'Narrows the home screen widget only — the draw and the book keep their own. The widget shows one spell a day, from whatever matches.' }
+            help:'Narrows the home screen widget only — the draw and the book keep their own. The widget shows one spell a day, from whatever matches.' },
+  lay:    { title:'Lay-down filter',
+            help:'Narrows what you choose from when laying spells in the circle — nothing else.' }
 };
 
-function openFilters(scope){
+function openFilters(scope, then){
   const f = S.filters[scope];
   const info = FILTER_SHEETS[scope];
   const tags = allTags();
@@ -994,7 +1000,7 @@ function openFilters(scope){
     </div>
     <div style="font-size:13px;color:var(--dim);text-align:center;padding:4px 0" id="fCount"></div>
     <button class="btn ghost" id="fClear">Clear all filters</button>
-  `, {onClose: () => {}});
+  `, {onClose: then || (() => {})});
 
   /* Once any filter is active, each Type & marks tag shows what the pool
      would shrink to if it were also Required — the original count crossed
