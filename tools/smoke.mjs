@@ -849,6 +849,23 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
   await p.close();
 }
 
+// ------------------------------------- the relay address survives a restart
+{
+  const first = await withBridge({ mode: 'ok', book: aBook() });
+  await first.p.evaluate(() => go('circle'));
+  await first.p.click('#cRelay');
+  await first.p.fill('#rUrl', 'spellbook-relay.someone.workers.dev');
+  await first.p.click('#rSave');
+  const saved = (await first.saves()).pop();
+  await first.p.close();
+  check('the relay address is written to the book file',
+    !!saved && JSON.parse(saved).settings.relayUrl === 'wss://spellbook-relay.someone.workers.dev');
+  const again = await withBridge({ mode: 'ok', book: saved });
+  check('and is the one used after a restart', await again.p.evaluate(() => relayBase())
+    === 'wss://spellbook-relay.someone.workers.dev');
+  await again.p.close();
+}
+
 // ------------------------------------------ the snapshots, from the vault
 {
   const { p } = await withBridge({
@@ -934,8 +951,25 @@ const F = (include = [], require = [], exclude = []) => ({ include, require, exc
   check('circle: nothing is opened at boot', await A.evaluate(() =>
     C.phase === 'idle' && C.ws === null && $('#navCircle').classList.contains('hide')));
 
+  check('circle: a pasted relay address becomes a socket address', await A.evaluate(() =>
+    cleanRelay('https://spellbook-relay.someone.workers.dev/') === 'wss://spellbook-relay.someone.workers.dev'
+      && cleanRelay('spellbook-relay.someone.workers.dev') === 'wss://spellbook-relay.someone.workers.dev'
+      && cleanRelay('wss://h.example/c/ABCD') === 'wss://h.example'
+      && cleanRelay('ftp://nope') === '' && cleanRelay('') === ''));
+  check('circle: the relay test reaches a running relay', await A.evaluate(() => testRelay(relayBase())));
+
   await A.click('nav button[data-tab="vault"]');
   await A.click('#vCircle');
+  await A.click('#cRelay');
+  await A.fill('#rUrl', 'https://spellbook-relay.someone.workers.dev/');
+  await A.click('#rSave');
+  check('circle: the relay address is kept as a setting',
+    await A.evaluate(() => S.relayUrl) === 'wss://spellbook-relay.someone.workers.dev');
+  await A.click('#cRelay');
+  await A.fill('#rUrl', '');
+  await A.click('#rSave');
+  check('circle: emptied, it goes back to the built-in one', await A.evaluate(() => S.relayUrl) === '');
+
   await A.fill('#cName', 'Host');
   await A.click('#cOpen');
   await A.waitForFunction(() => C.phase === 'live');

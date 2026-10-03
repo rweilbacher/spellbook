@@ -93,7 +93,9 @@ rendering could not be switched off.
 `drawCount` · `filters` (the sticky filters, one per screen — see below) ·
 `noRepeat` · `sort` · `inboxWeight` · `flaggedWeight` · `tagKindOverrides` ·
 `btMic` · `notifyTimes` · `notifyText` · `circleName` (what the circle calls
-you; empty until you first open or join one).
+you; empty until you first open or join one) · `relayUrl` (the circle's relay,
+as a `wss://` address; empty means the built-in `RELAY_URL` in `js/circle.js`).
+Like every setting, a restore brings back the file's own value.
 
 `DEFAULTS` in `index.html` holds every default except `notifyText`, which is
 Kotlin's (`Reminders.DEFAULT_TEXT`, read across the bridge — see

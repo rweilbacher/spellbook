@@ -46,7 +46,8 @@ phones talk to.
 - Cloudflare sees a laid-down spell's words in the clear. Said plainly on the
   circle screen, the way the djinn's spec says it of Anthropic.
 - The relay deploys separately from the APK (`relay/README.md`). Its address is
-  a constant in `js/circle.js`, set once after the first deploy.
+  a setting (`relayUrl`), changeable on the circle screen without a new APK,
+  falling back to the `RELAY_URL` constant in `js/circle.js`.
 - The phone can't use the local relay: the app is served over https and Android
   won't open a plain `ws://` socket from it. Desk testing is browser to browser
   locally, or phone to browser through the deployed relay.

@@ -17,9 +17,10 @@
 
    Nothing is opened at boot. No circle, no socket. */
 
-/* Where the relay lives. This is the workers.dev address `wrangler deploy`
-   prints for relay/ — check it after the first deploy. In preview mode
-   ?relay=ws://localhost:8787 points the page at tools/relay.mjs instead. */
+/* Where the relay lives, unless the circle screen's Relay setting
+   (S.relayUrl) says otherwise — that's the one to change after a deploy,
+   no new APK needed. In preview mode ?relay=ws://localhost:8787 points the
+   page at tools/relay.mjs and beats both. */
 const RELAY_URL = 'wss://spellbook-relay.rweilbacher.workers.dev';
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';     // no 0/O, no 1/I
 const CIRCLE_CODE_RE = /^[A-HJ-NP-Z2-9]{4}$/;
@@ -47,7 +48,34 @@ function relayBase(){
     const q = new URLSearchParams(location.search).get('relay');
     if(q) return q.replace(/\/+$/, '');
   }
-  return RELAY_URL;
+  return cleanRelay(S.relayUrl) || RELAY_URL;
+}
+/* Whatever was pasted — the https:// address wrangler printed, a bare host,
+   a wss:// URL with a path on it — as the scheme and host a socket wants.
+   '' when it isn't an address at all. */
+function cleanRelay(v){
+  let s = (v || '').trim();
+  if(!s) return '';
+  if(!/^[a-z]+:\/\//i.test(s)) s = 'wss://' + s;
+  s = s.replace(/^https:\/\//i, 'wss://').replace(/^http:\/\//i, 'ws://');
+  try{
+    const u = new URL(s);
+    return /^wss?:$/.test(u.protocol) && u.host ? u.protocol + '//' + u.host : '';
+  }catch(e){ return ''; }
+}
+function relayLabel(base){ return (base || relayBase()).replace(/^wss?:\/\//, ''); }
+
+/* Can a socket be opened to it at all? Opens one to a throwaway code and
+   closes it again without saying hello, which the relay treats as nothing. */
+function testRelay(base){
+  return new Promise(res => {
+    let ws, done = false;
+    const fin = ok => { if(done) return; done = true; clearTimeout(t); if(ok) try{ ws.close(); }catch(e){} res(ok); };
+    const t = setTimeout(() => fin(false), 8000);
+    try{ ws = new WebSocket(`${base}/c/${newCode()}`); }catch(e){ fin(false); return; }
+    ws.onopen = () => fin(true);
+    ws.onerror = () => fin(false);
+  });
 }
 function newCode(){
   const b = new Uint8Array(4);
@@ -74,7 +102,7 @@ function circleConnect(){
   if(C.ws){ const old = C.ws; C.ws = null; try{ old.close(); }catch(e){} }
   let ws;
   try{ ws = new WebSocket(`${relayBase()}/c/${C.code}`); }
-  catch(e){ circleEnd("Couldn't reach the circle"); return; }
+  catch(e){ circleEnd(`Couldn't reach the relay at ${relayLabel()}`); return; }
   C.ws = ws;
   ws.onopen = () => {
     if(ws !== C.ws) return;
@@ -102,7 +130,7 @@ function circleDropped(){
   clearInterval(C.ping); C.ping = null;
   C.ws = null;
   if(C.phase === 'idle') return;
-  if(!C.token){ circleEnd(C.phase === 'waiting' ? 'Lost the connection' : "Couldn't reach the circle"); return; }
+  if(!C.token){ circleEnd(C.phase === 'waiting' ? 'Lost the connection' : `Couldn't reach the relay at ${relayLabel()}`); return; }
   if(C.phase !== 'away'){ C.phase = 'away'; C.awaySince = Date.now(); circleRefresh(); }
   if(Date.now() - C.awaySince > GIVE_UP_MS){ circleEnd('Lost the circle'); return; }
   const wait = RETRY_S[Math.min(C.retry++, RETRY_S.length - 1)] * 1000;
@@ -301,7 +329,13 @@ function renderCircle(){
         <input id="cCode" class="ccode-in" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="K7QX"></div>
       <button class="btn ghost" id="cJoin">Join</button>
       <div class="banner">Spells travel through a relay that keeps nothing and forgets the circle when it ends.
-        Only a spell's words and filing tags are sent — never its notes, recordings, counts or source.</div>`;
+        Only a spell's words and filing tags are sent — never its notes, recordings, counts or source.</div>
+      <div class="group"><span class="eyebrow">Relay</span>
+        <button class="item" id="cRelay">
+          <svg viewBox="0 0 24 24"><path d="M4 12h16"/><circle cx="4" cy="12" r="2"/><circle cx="20" cy="12" r="2"/><path d="M12 7v10"/></svg>
+          <span class="lab">${esc(relayLabel())}<span class="s">${S.relayUrl ? 'Set here' : 'The built-in address'}</span></span>
+          <span class="val">Change</span></button></div>`;
+    $('#cRelay').onclick = openRelaySheet;
     const keepName = () => { const v = $('#cName').value.trim().slice(0, 24); if(v !== (S.circleName || '')){ S.circleName = v; persist(); } };
     $('#cName').onchange = keepName;
     $('#cOpen').onclick = () => { keepName(); circleStart(true); };
@@ -396,6 +430,40 @@ document.addEventListener('click', e => {
     if(id) pickUp(id); else circleSend({ t:'pickup', key:s.key });
   }
 });
+
+/* ---------- the relay's address ---------- */
+
+function openRelaySheet(){
+  sheet('circle-relay', 'Relay', `
+    <div class="field"><label for="rUrl">Address</label>
+      <input id="rUrl" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="url"
+        placeholder="spellbook-relay.you.workers.dev" value="${esc(relayLabel(cleanRelay(S.relayUrl) || RELAY_URL))}"></div>
+    <p class="help">The address <code>wrangler deploy</code> printed — with or without https://.
+      Empty goes back to the built-in one, ${esc(relayLabel(RELAY_URL))}.</p>
+    <p class="help" id="rStatus"></p>
+    <button class="btn" id="rSave">Save</button>
+    <button class="btn ghost" id="rTest">Test the connection</button>`);
+  const read = () => {
+    const v = $('#rUrl').value.trim();
+    return v ? cleanRelay(v) : RELAY_URL;
+  };
+  $('#rSave').onclick = () => {
+    const v = $('#rUrl').value.trim(), c = read();
+    if(v && !c){ $('#rStatus').textContent = "That isn't an address."; return; }
+    S.relayUrl = (!v || c === RELAY_URL) ? '' : c;
+    persist(); closeSheet(); renderCircle();
+    toast('Relay saved');
+  };
+  $('#rTest').onclick = async () => {
+    const c = read();
+    if(!c){ $('#rStatus').textContent = "That isn't an address."; return; }
+    $('#rStatus').textContent = `Trying ${relayLabel(c)}…`;
+    const ok = await testRelay(c);
+    if(openSheetName() !== 'circle-relay') return;
+    $('#rStatus').textContent = ok ? `Reached ${relayLabel(c)}.`
+      : `Couldn't reach ${relayLabel(c)}. Check the address, and that the phone is online — a brand-new workers.dev address can take a few minutes to start answering.`;
+  };
+}
 
 /* ---------- laying down, from the book ---------- */
 

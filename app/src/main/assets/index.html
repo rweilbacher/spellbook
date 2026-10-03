@@ -108,7 +108,7 @@
    adoptSettings() fills it in. See notifyLimits() in js/reminders.js. */
 const DEFAULTS = { drawCount:1, noRepeat:12, sort:'recent',
   inboxWeight:3, flaggedWeight:1, tagKindOverrides:{}, btMic:true, notifyTimes:[],
-  circleName:'' };
+  circleName:'', relayUrl:'' };
 /* The shape of the file on disk. Stamped by persist(), read by
    runMigrations() to decide what a book of unknown vintage still needs.
    Bump it when a migration is added; the per-field guards stay as
@@ -349,6 +349,7 @@ function adoptSettings(){
   if(!S.tagKindOverrides || typeof S.tagKindOverrides !== 'object') S.tagKindOverrides = {};
   S.notifyTimes = cleanTimes(S.notifyTimes);
   if(typeof S.circleName !== 'string') S.circleName = '';
+  if(typeof S.relayUrl !== 'string') S.relayUrl = '';
   if(typeof S.notifyText !== 'string' || !S.notifyText) S.notifyText = notifyLimits().defaultText;
 }
 

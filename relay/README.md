@@ -15,11 +15,11 @@ npx wrangler deploy
 ```
 
 The last line it prints is the relay's address, something like
-`https://spellbook-relay.<your-subdomain>.workers.dev`. **Check that it
-matches `RELAY_URL` at the top of `app/src/main/assets/js/circle.js`** (with
-`wss://` in place of `https://`), and fix that line if it doesn't — the
-subdomain is chosen when the account is made, and the constant is a guess
-until then.
+`https://spellbook-relay.<your-subdomain>.workers.dev`. Tell the app: **The
+circle → Relay → Change**, paste it as it is, and *Test the connection*. It is
+saved in the book's settings, so it survives restarts and updates. To make it
+the default for a fresh install too, put it in `RELAY_URL` at the top of
+`app/src/main/assets/js/circle.js`, with `wss://` in place of `https://`.
 
 After that, pushes that touch `relay/` deploy it through the Relay workflow,
 if the repo has two secrets: `CLOUDFLARE_API_TOKEN` (create one from the
